@@ -1,34 +1,22 @@
 ﻿# Markdown Reading Desk — installer (per-user, no admin rights needed)
 #
 #   powershell -ExecutionPolicy Bypass -File install.ps1
+#   powershell -ExecutionPolicy Bypass -File install.ps1 -Dest "G:\Programs\ReadingDesk"
 #
-# Installs to %LOCALAPPDATA%\ReadingDesk, adds a Start Menu entry, and registers
-# itself as a handler for .md files. Windows 11 hash-protects the *default* app
-# choice, so the final "always use this app" pick has to be made by hand — the
-# script prints the steps when it finishes.
+# Installs to %LOCALAPPDATA%\ReadingDesk unless -Dest says otherwise, adds a
+# Start Menu entry, and registers itself as a handler for .md files. Windows 11
+# hash-protects the *default* app choice, so the final "always use this app"
+# pick has to be made by hand — the script prints the steps when it finishes.
+
+param(
+  [string]$Dest = (Join-Path $env:LOCALAPPDATA 'ReadingDesk')
+)
 
 $ErrorActionPreference = 'Stop'
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
-$app  = Join-Path $env:LOCALAPPDATA 'ReadingDesk'
+$app  = $Dest
 New-Item -ItemType Directory -Force -Path (Join-Path $app 'open') | Out-Null
 Add-Type -AssemblyName System.Drawing
-
-# ── viewer.html: standalone wrapper around the reader, with an embed slot ─────
-$slot = '<script type="text/markdown" id="embedded" data-name="<!--NAME-->"><!--EMBED--></script>' + "`r`n"
-$body = Get-Content -Raw -Encoding UTF8 (Join-Path $here 'reading-desk.html')
-if ($body -notmatch '<div class="app" id="app">') { throw 'reading-desk.html is missing its app anchor' }
-$body = $body.Replace('<div class="app" id="app">', $slot + '<div class="app" id="app">')
-
-$head = @'
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<style>html{color-scheme:light dark}body{margin:0;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
-'@
-[System.IO.File]::WriteAllText((Join-Path $app 'viewer.html'), ($head + "`r`n" + $body + "`r`n</html>`r`n"),
-  (New-Object System.Text.UTF8Encoding($false)))
 
 # ── icon: a teal page with rules ──────────────────────────────────────────────
 function New-RoundRect([int]$x, [int]$y, [int]$w, [int]$h, [int]$r) {
@@ -79,6 +67,32 @@ $bw.Write($png); $bw.Flush()
 $icoPath = Join-Path $app 'ReadingDesk.ico'
 [System.IO.File]::WriteAllBytes($icoPath, $ico.ToArray())
 $bw.Dispose()
+
+# ── viewer.html: standalone wrapper around the reader, with an embed slot ─────
+# The reader runs in a browser app window, so the taskbar and title bar take
+# their icon from the page's favicon — the same artwork, inlined.
+$slot = '<script type="text/markdown" id="embedded" data-name="<!--NAME-->"><!--EMBED--></script>' + "`r`n"
+$body = Get-Content -Raw -Encoding UTF8 (Join-Path $here 'reading-desk.html')
+if ($body -notmatch '<div class="app" id="app">') { throw 'reading-desk.html is missing its app anchor' }
+$body = $body.Replace('<div class="app" id="app">', $slot + '<div class="app" id="app">')
+
+$favicon = '<link rel="icon" type="image/png" href="data:image/png;base64,{0}">' -f [Convert]::ToBase64String($png)
+if ($body -match '</title>') {
+  $body = $body -replace '</title>', ("</title>`r`n" + $favicon)
+} else {
+  $body = $favicon + "`r`n" + $body
+}
+
+$head = @'
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>html{color-scheme:light dark}body{margin:0;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
+'@
+[System.IO.File]::WriteAllText((Join-Path $app 'viewer.html'), ($head + "`r`n" + $body + "`r`n</html>`r`n"),
+  (New-Object System.Text.UTF8Encoding($false)))
 
 # ── compile the launcher ──────────────────────────────────────────────────────
 $csc = Join-Path $env:SystemRoot 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'

@@ -65,7 +65,12 @@ powershell -ExecutionPolicy Bypass -File install.ps1
 ```
 
 That puts `ReadingDesk.exe` in `%LOCALAPPDATA%\ReadingDesk`, adds a Start Menu
-entry, and registers the app as a handler for `.md`.
+entry, and registers the app as a handler for `.md`. Pass `-Dest` to put it
+somewhere else:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File install.ps1 -Dest "G:\Programs\ReadingDesk"
+```
 
 **One step is yours.** Windows 11 protects the default-app choice with a hash,
 so no installer — this one included — may set it for you:

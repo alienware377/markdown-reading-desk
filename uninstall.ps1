@@ -6,7 +6,18 @@
 # removes the Start Menu entry. The install folder is left in place so nothing
 # is deleted behind your back — the path is printed at the end.
 
-$app = Join-Path $env:LOCALAPPDATA 'ReadingDesk'
+param(
+  [string]$Dest
+)
+
+# Find the install folder from the registration, so this works wherever it went.
+$app = $Dest
+if (-not $app) {
+  $reg = (Get-ItemProperty 'HKCU:\Software\Classes\Applications\ReadingDesk.exe\shell\open\command' `
+          -ErrorAction SilentlyContinue).'(default)'
+  if ($reg -match '^"([^"]+)"') { $app = Split-Path -Parent $matches[1] }
+}
+if (-not $app) { $app = Join-Path $env:LOCALAPPDATA 'ReadingDesk' }
 
 Remove-Item 'HKCU:\Software\Classes\ReadingDesk.md' -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item 'HKCU:\Software\Classes\Applications\ReadingDesk.exe' -Recurse -Force -ErrorAction SilentlyContinue
