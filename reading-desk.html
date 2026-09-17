@@ -1,7 +1,7 @@
 <title>Markdown Reading Desk</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Literata:opsz,wght@7..72,400;7..72,600&family=Atkinson+Hyperlegible:wght@400;700&display=swap">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
 <style>
 /* ── chrome tokens ─────────────────────────────────────────── */
@@ -127,6 +127,7 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--c-sunk);border:1px
 .reader table{border-collapse:collapse;width:100%;font-size:.9em;font-variant-numeric:tabular-nums}
 .reader th,.reader td{border-bottom:1px solid var(--r-line);padding:.5em .7em;text-align:left}
 .reader th{font-family:var(--ui);font-size:.85em;letter-spacing:.06em;text-transform:uppercase;color:var(--r-mute);font-weight:600}
+.reader .fallback{color:var(--r-mute);font-size:.85em;border-left:2px solid var(--r-accent);padding-left:.8em}
 .reader mark{background:var(--r-mark);color:inherit;padding:0 .12em}
 .reader img{max-width:100%;border-radius:8px}
 .reader input[type=checkbox]{accent-color:var(--r-accent);margin-right:.4em}
@@ -421,7 +422,14 @@ const EMBEDDED = !!embed;
 let source = EMBEDDED ? embed.textContent.replace(/<\\\/script/gi, '</script')
                       : (localStorage.getItem('reading-desk-doc') || SAMPLE);
 if (EMBEDDED && embed.dataset.name) $('#docname').textContent = embed.dataset.name;
-marked.setOptions({gfm:true, breaks:false});
+const FORMATTER = !!(window.marked && window.DOMPurify);
+if (FORMATTER) marked.setOptions({gfm:true, breaks:false});
+
+function toHtml(md){
+  if (FORMATTER) return DOMPurify.sanitize(marked.parse(md));
+  const esc = md.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+  return '<p class="fallback">The markdown formatter didn’t load, so this is the plain text.</p><pre>' + esc + '</pre>';
+}
 
 function bionify(root, pct){
   const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
@@ -443,7 +451,7 @@ function bionify(root, pct){
 }
 
 function render(){
-  const html = DOMPurify.sanitize(marked.parse(source));
+  const html = toHtml(source);
   doc.innerHTML = html;
   doc.querySelectorAll('table').forEach(t => {
     const w = document.createElement('div'); w.className = 'tablewrap';
