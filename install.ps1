@@ -133,6 +133,17 @@ Set-ItemProperty "$ak\DefaultIcon" '(default)' "$icoPath,0"
 Set-ItemProperty "$ak\shell\open\command" '(default)' $cmd
 Set-ItemProperty "$ak\SupportedTypes" '.md' ''
 
+# Register as a real application, so Windows Settings lists it under
+# Default apps instead of only offering it in the Open-with picker.
+$cap = 'HKCU:\Software\ReadingDesk\Capabilities'
+New-Item -Force -Path "$cap\FileAssociations" | Out-Null
+Set-ItemProperty $cap 'ApplicationName' 'Markdown Reading Desk'
+Set-ItemProperty $cap 'ApplicationDescription' 'Read markdown files with reading-mode controls'
+Set-ItemProperty $cap 'ApplicationIcon' "$icoPath,0"
+Set-ItemProperty "$cap\FileAssociations" '.md' 'ReadingDesk.md'
+New-Item -Force -Path 'HKCU:\Software\RegisteredApplications' | Out-Null
+Set-ItemProperty 'HKCU:\Software\RegisteredApplications' 'Markdown Reading Desk' 'Software\ReadingDesk\Capabilities'
+
 New-Item -Force -Path 'HKCU:\Software\Classes\.md\OpenWithProgids' | Out-Null
 Set-ItemProperty 'HKCU:\Software\Classes\.md' '(default)' 'ReadingDesk.md'
 Set-ItemProperty 'HKCU:\Software\Classes\.md' 'PerceivedType' 'text'

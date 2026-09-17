@@ -21,6 +21,8 @@ if (-not $app) { $app = Join-Path $env:LOCALAPPDATA 'ReadingDesk' }
 
 Remove-Item 'HKCU:\Software\Classes\ReadingDesk.md' -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item 'HKCU:\Software\Classes\Applications\ReadingDesk.exe' -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item 'HKCU:\Software\ReadingDesk' -Recurse -Force -ErrorAction SilentlyContinue
+Remove-ItemProperty 'HKCU:\Software\RegisteredApplications' -Name 'Markdown Reading Desk' -Force -ErrorAction SilentlyContinue
 Remove-ItemProperty 'HKCU:\Software\Classes\.md\OpenWithProgids' -Name 'ReadingDesk.md' -Force -ErrorAction SilentlyContinue
 
 $json = Join-Path $app 'previous-md-association.json'
