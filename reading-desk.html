@@ -1,0 +1,588 @@
+<title>Markdown Reading Desk</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Literata:opsz,wght@7..72,400;7..72,600&family=Atkinson+Hyperlegible:wght@400;700&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
+<style>
+/* ── chrome tokens ─────────────────────────────────────────── */
+:root{
+  --c-bg:#E9EDEA; --c-panel:#F7F9F7; --c-sunk:#DFE5E1;
+  --c-ink:#141A18; --c-mute:#5C6B66; --c-line:#CFD8D3;
+  --c-accent:#2F6F66; --c-accent-soft:#D8E6E2;
+  --c-shadow:0 1px 2px rgba(16,32,28,.06),0 8px 24px -12px rgba(16,32,28,.18);
+  --ui:"IBM Plex Sans",ui-sans-serif,system-ui,sans-serif;
+  --disp:"Fraunces",Georgia,serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  /* reader defaults (Paper) */
+  --r-bg:#FAFAF8; --r-ink:#1A1D1B; --r-mute:#6A736F; --r-line:#E2E5E1;
+  --r-accent:#2F6F66; --r-mark:#FBEBA6; --r-code:#F1F3F0;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --c-bg:#0E1312; --c-panel:#161D1B; --c-sunk:#0A0F0E;
+    --c-ink:#E3EAE7; --c-mute:#8DA09A; --c-line:#26312E;
+    --c-accent:#63B7A9; --c-accent-soft:#1C2E2B;
+    --c-shadow:0 1px 2px rgba(0,0,0,.4),0 10px 30px -14px rgba(0,0,0,.7);
+  }
+}
+:root[data-theme="dark"]{
+  --c-bg:#0E1312; --c-panel:#161D1B; --c-sunk:#0A0F0E;
+  --c-ink:#E3EAE7; --c-mute:#8DA09A; --c-line:#26312E;
+  --c-accent:#63B7A9; --c-accent-soft:#1C2E2B;
+  --c-shadow:0 1px 2px rgba(0,0,0,.4),0 10px 30px -14px rgba(0,0,0,.7);
+}
+/* ── reader themes ─────────────────────────────────────────── */
+[data-rt="paper"]  {--r-bg:#FAFAF8;--r-ink:#1A1D1B;--r-mute:#6A736F;--r-line:#E2E5E1;--r-accent:#2F6F66;--r-mark:#FBEBA6;--r-code:#F1F3F0}
+[data-rt="sepia"]  {--r-bg:#F4EBDC;--r-ink:#3B2E20;--r-mute:#7E6B55;--r-line:#E0D3BE;--r-accent:#9A5B2A;--r-mark:#EBD9A0;--r-code:#EBE0CD}
+[data-rt="night"]  {--r-bg:#141715;--r-ink:#D9E0DC;--r-mute:#8A9691;--r-line:#272E2B;--r-accent:#6FBDAE;--r-mark:#4A4526;--r-code:#1C2220}
+[data-rt="slate"]  {--r-bg:#1A1E28;--r-ink:#D6DBE6;--r-mute:#8790A3;--r-line:#2B3140;--r-accent:#8FA6E8;--r-mark:#3C3A5C;--r-code:#222736}
+[data-rt="solar"]  {--r-bg:#FDF6E3;--r-ink:#3A4B51;--r-mute:#7E8E8E;--r-line:#EDE3C8;--r-accent:#268BD2;--r-mark:#EEE4B8;--r-code:#F2EAD3}
+[data-rt="dusk"]   {--r-bg:#241F2B;--r-ink:#E3DAEA;--r-mute:#9E90AB;--r-line:#372F41;--r-accent:#C9A6E8;--r-mark:#4B3A5E;--r-code:#2C2534}
+[data-rt="mono"]   {--r-bg:#FFFFFF;--r-ink:#000000;--r-mute:#333333;--r-line:#000000;--r-accent:#0000CC;--r-mark:#FFFF00;--r-code:#F0F0F0}
+
+*{box-sizing:border-box}
+html,body{height:100%}
+body{background:var(--c-bg);color:var(--c-ink);font-family:var(--ui);overflow:hidden}
+button,input,select{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--c-accent);outline-offset:2px;border-radius:3px}
+
+/* ── shell ─────────────────────────────────────────────────── */
+.app{display:grid;grid-template-columns:288px 1fr;grid-template-rows:auto 1fr;height:100dvh}
+.bar{grid-column:1/-1;display:flex;align-items:center;gap:14px;padding:0 16px;height:52px;
+  background:var(--c-panel);border-bottom:1px solid var(--c-line);position:relative;z-index:5}
+.brand{display:flex;align-items:baseline;gap:9px;margin-right:auto;min-width:0}
+.brand b{font-family:var(--disp);font-weight:600;font-size:17px;letter-spacing:-.01em;white-space:nowrap}
+.brand span{font-size:11px;color:var(--c-mute);letter-spacing:.09em;text-transform:uppercase;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stats{display:flex;gap:16px;font-size:12px;color:var(--c-mute);font-variant-numeric:tabular-nums}
+.stats b{color:var(--c-ink);font-weight:500}
+.bar .tools{display:flex;gap:6px}
+.progress{position:absolute;left:0;bottom:-1px;height:2px;background:var(--c-accent);width:0;transition:width .12s linear}
+
+.btn{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 11px;border:1px solid var(--c-line);
+  background:var(--c-panel);border-radius:7px;font-size:12.5px;cursor:pointer;white-space:nowrap}
+.btn:hover{border-color:var(--c-accent);color:var(--c-accent)}
+.btn[aria-pressed="true"]{background:var(--c-accent-soft);border-color:var(--c-accent);color:var(--c-accent)}
+
+/* ── control panel ─────────────────────────────────────────── */
+.panel{background:var(--c-panel);border-right:1px solid var(--c-line);overflow-y:auto;padding:18px 16px 40px;
+  display:flex;flex-direction:column;gap:22px}
+.app.collapsed{grid-template-columns:0 1fr}
+.app.collapsed .panel{display:none}
+.grp{display:flex;flex-direction:column;gap:11px}
+.grp>h2{margin:0;font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--c-mute);font-weight:600}
+.row{display:flex;flex-direction:column;gap:5px}
+.row>label{display:flex;justify-content:space-between;font-size:12px;color:var(--c-mute)}
+.row>label b{color:var(--c-ink);font-weight:500;font-variant-numeric:tabular-nums}
+input[type=range]{width:100%;accent-color:var(--c-accent);height:18px}
+.swatches{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.sw{height:42px;border-radius:7px;border:1px solid var(--c-line);cursor:pointer;position:relative;
+  display:flex;align-items:flex-end;justify-content:center;padding-bottom:3px;font-size:9px;letter-spacing:.04em;overflow:hidden}
+.sw[aria-pressed="true"]{border-color:var(--c-accent);box-shadow:0 0 0 2px var(--c-accent-soft)}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{padding:5px 10px;border:1px solid var(--c-line);border-radius:999px;background:transparent;font-size:12px;cursor:pointer}
+.chip:hover{border-color:var(--c-accent)}
+.chip[aria-pressed="true"]{background:var(--c-accent);border-color:var(--c-accent);color:#fff}
+:root[data-theme="dark"] .chip[aria-pressed="true"],
+[data-theme="dark"] .sw[aria-pressed="true"]{color:#0E1312}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .chip[aria-pressed="true"]{color:#0E1312}}
+.toggles{display:flex;flex-direction:column;gap:2px}
+.tg{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 8px;border-radius:7px;
+  background:transparent;border:0;cursor:pointer;text-align:left;font-size:13px;width:100%}
+.tg:hover{background:var(--c-sunk)}
+.tg small{display:block;font-size:11px;color:var(--c-mute);margin-top:1px}
+.tg .knob{flex:none;width:32px;height:18px;border-radius:999px;background:var(--c-sunk);border:1px solid var(--c-line);position:relative;transition:background .15s}
+.tg .knob::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:var(--c-mute);transition:transform .15s,background .15s}
+.tg[aria-pressed="true"] .knob{background:var(--c-accent);border-color:var(--c-accent)}
+.tg[aria-pressed="true"] .knob::after{transform:translateX(14px);background:#fff}
+.hint{font-size:11px;line-height:1.6;color:var(--c-mute)}
+kbd{font-family:var(--mono);font-size:10.5px;background:var(--c-sunk);border:1px solid var(--c-line);
+  border-bottom-width:2px;border-radius:4px;padding:1px 4px}
+
+/* ── stage + reader ────────────────────────────────────────── */
+.stage{position:relative;overflow-y:auto;background:var(--r-bg);scroll-behavior:smooth}
+.reader{margin:0 auto;padding:64px 28px 45vh;max-width:var(--measure,66ch);color:var(--r-ink);
+  font-family:var(--body,"Literata",Georgia,serif);font-size:var(--fs,19px);line-height:var(--lh,1.72);
+  letter-spacing:var(--tr,0);word-spacing:var(--ws,0)}
+.reader.justify{text-align:justify;text-justify:inter-word}
+.reader.hyphen{hyphens:auto}
+.reader>*{margin:0 0 var(--ps,1.1em)}
+.reader h1,.reader h2,.reader h3,.reader h4{font-family:var(--head,"Fraunces",Georgia,serif);line-height:1.22;
+  text-wrap:balance;letter-spacing:-.012em;margin:1.9em 0 .55em;font-weight:600;text-align:left}
+.reader>h1:first-child,.reader>h2:first-child{margin-top:0}
+.reader h1{font-size:1.92em}.reader h2{font-size:1.42em}.reader h3{font-size:1.14em}
+.reader h4{font-size:1em;letter-spacing:.06em;text-transform:uppercase;color:var(--r-mute)}
+.reader h2{padding-bottom:.28em;border-bottom:1px solid var(--r-line)}
+.reader a{color:var(--r-accent);text-decoration-thickness:1px;text-underline-offset:2px}
+.reader strong{font-weight:600}
+.reader ul,.reader ol{padding-left:1.35em}
+.reader li{margin-bottom:.4em}
+.reader li::marker{color:var(--r-mute)}
+.reader blockquote{border-left:2px solid var(--r-accent);padding:.1em 0 .1em 1.1em;color:var(--r-mute);font-style:italic}
+.reader code{font-family:var(--mono);font-size:.86em;background:var(--r-code);padding:.12em .35em;border-radius:4px}
+.reader pre{background:var(--r-code);padding:14px 16px;border-radius:9px;overflow-x:auto;border:1px solid var(--r-line)}
+.reader pre code{background:none;padding:0;font-size:.82em;line-height:1.6}
+.reader hr{border:0;border-top:1px solid var(--r-line);margin:2.4em 0}
+.tablewrap{overflow-x:auto;margin:0 0 var(--ps,1.1em)}
+.reader table{border-collapse:collapse;width:100%;font-size:.9em;font-variant-numeric:tabular-nums}
+.reader th,.reader td{border-bottom:1px solid var(--r-line);padding:.5em .7em;text-align:left}
+.reader th{font-family:var(--ui);font-size:.85em;letter-spacing:.06em;text-transform:uppercase;color:var(--r-mute);font-weight:600}
+.reader mark{background:var(--r-mark);color:inherit;padding:0 .12em}
+.reader img{max-width:100%;border-radius:8px}
+.reader input[type=checkbox]{accent-color:var(--r-accent);margin-right:.4em}
+.reader ul:has(input[type=checkbox]){list-style:none;padding-left:.2em}
+
+.reader.dropcap>p:first-of-type::first-letter{font-family:var(--head,"Fraunces",serif);float:left;
+  font-size:3.3em;line-height:.84;padding:.06em .09em 0 0;color:var(--r-accent);font-weight:600}
+.bion{font-weight:700}
+
+/* focus mode */
+.reader.focus>*{opacity:.3;transition:opacity .22s ease}
+.reader.focus>.lit,.reader.focus>*:hover{opacity:1}
+/* ruler */
+#ruler{position:fixed;left:0;right:0;height:var(--rh,44px);pointer-events:none;display:none;z-index:3;
+  border-top:1px solid color-mix(in srgb,var(--r-accent) 45%,transparent);
+  border-bottom:1px solid color-mix(in srgb,var(--r-accent) 45%,transparent);
+  background:color-mix(in srgb,var(--r-accent) 7%,transparent)}
+body.ruler-on #ruler{display:block}
+body.ruler-on .stage{cursor:crosshair}
+
+/* toc */
+.toc{position:fixed;right:18px;top:64px;width:250px;max-height:72vh;overflow-y:auto;background:var(--c-panel);
+  border:1px solid var(--c-line);border-radius:11px;box-shadow:var(--c-shadow);padding:12px 6px 12px 12px;z-index:6;display:none}
+body.toc-on .toc{display:block}
+.toc h2{margin:0 0 8px;font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--c-mute)}
+.toc a{display:block;padding:4px 8px 4px 0;font-size:12.5px;color:var(--c-mute);text-decoration:none;border-radius:5px;line-height:1.35}
+.toc a:hover{color:var(--c-accent)}
+.toc a.lvl3{padding-left:13px;font-size:12px}
+.toc a.lvl4{padding-left:26px;font-size:11.5px}
+.toc a.here{color:var(--c-accent);font-weight:500}
+
+/* source editor */
+.src{position:fixed;inset:auto 0 0 0;height:38vh;background:var(--c-panel);border-top:1px solid var(--c-line);
+  display:none;flex-direction:column;z-index:7;box-shadow:0 -10px 30px -18px rgba(0,0,0,.5)}
+body.src-on .src{display:flex}
+.src header{display:flex;align-items:center;gap:10px;padding:8px 14px;border-bottom:1px solid var(--c-line);
+  font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--c-mute)}
+.src textarea{flex:1;border:0;background:var(--c-sunk);color:var(--c-ink);font-family:var(--mono);font-size:13px;
+  line-height:1.6;padding:14px;resize:none;width:100%}
+.drop{position:fixed;inset:0;z-index:20;display:none;align-items:center;justify-content:center;
+  background:color-mix(in srgb,var(--c-accent) 18%,transparent);backdrop-filter:blur(2px);
+  font-family:var(--disp);font-size:22px;color:var(--c-ink)}
+body.dragging .drop{display:flex}
+
+@media (prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
+@media (max-width:820px){
+  .app{grid-template-columns:1fr}
+  .panel{position:fixed;inset:52px auto 0 0;width:280px;z-index:8;box-shadow:var(--c-shadow)}
+  .app.collapsed .panel{display:none}
+  .stats{display:none}
+  .toc{right:8px;width:min(250px,72vw)}
+}
+</style>
+
+<div class="app" id="app">
+  <header class="bar">
+    <button class="btn" id="tPanel" title="Toggle settings (\)">☰</button>
+    <div class="brand"><b>Reading Desk</b><span id="docname">sample document</span></div>
+    <div class="stats">
+      <div><b id="sWords">0</b> words</div>
+      <div><b id="sTime">0</b> min</div>
+      <div><b id="sPct">0</b>% read</div>
+    </div>
+    <div class="tools">
+      <button class="btn" id="tToc" aria-pressed="false">Contents</button>
+      <button class="btn" id="tSrc" aria-pressed="false">Source</button>
+      <button class="btn" id="bOpen">Open .md</button>
+    </div>
+    <div class="progress" id="prog"></div>
+  </header>
+
+  <aside class="panel" id="panel">
+    <div class="grp">
+      <h2>Page tint</h2>
+      <div class="swatches" id="themes"></div>
+    </div>
+
+    <div class="grp">
+      <h2>Typeface</h2>
+      <div class="chips" id="fonts"></div>
+    </div>
+
+    <div class="grp">
+      <h2>Measure &amp; rhythm</h2>
+      <div class="row"><label>Text size <b id="vFs">19px</b></label><input type="range" id="fs" min="14" max="30" step="1"></div>
+      <div class="row"><label>Line height <b id="vLh">1.72</b></label><input type="range" id="lh" min="1.2" max="2.4" step="0.02"></div>
+      <div class="row"><label>Column width <b id="vMe">66ch</b></label><input type="range" id="me" min="36" max="110" step="1"></div>
+      <div class="row"><label>Paragraph gap <b id="vPs">1.10em</b></label><input type="range" id="ps" min="0.4" max="2.4" step="0.05"></div>
+      <div class="row"><label>Letter spacing <b id="vTr">0.000em</b></label><input type="range" id="tr" min="-0.02" max="0.14" step="0.005"></div>
+      <div class="row"><label>Word spacing <b id="vWs">0.00em</b></label><input type="range" id="ws" min="0" max="0.6" step="0.02"></div>
+    </div>
+
+    <div class="grp">
+      <h2>Reading aids</h2>
+      <div class="toggles">
+        <button class="tg" id="tBion" aria-pressed="false"><span>Bionic emphasis<small>Bold word-starts pull the eye along</small></span><i class="knob"></i></button>
+        <button class="tg" id="tFocus" aria-pressed="false"><span>Focus dimming<small>Only the block you point at stays bright</small></span><i class="knob"></i></button>
+        <button class="tg" id="tRuler" aria-pressed="false"><span>Reading ruler<small>A band that follows your cursor</small></span><i class="knob"></i></button>
+        <button class="tg" id="tJust" aria-pressed="false"><span>Justified text<small>Even right edge</small></span><i class="knob"></i></button>
+        <button class="tg" id="tHyph" aria-pressed="true"><span>Hyphenation<small>Softer gaps when justified</small></span><i class="knob"></i></button>
+        <button class="tg" id="tCap" aria-pressed="false"><span>Drop cap<small>Large opening letter</small></span><i class="knob"></i></button>
+      </div>
+      <div class="row" id="bionRow" hidden><label>Bionic strength <b id="vBs">40%</b></label><input type="range" id="bs" min="20" max="70" step="5"></div>
+      <div class="row" id="rulerRow" hidden><label>Ruler height <b id="vRh">44px</b></label><input type="range" id="rh" min="24" max="140" step="2"></div>
+    </div>
+
+    <div class="grp">
+      <h2>Document</h2>
+      <div class="chips">
+        <button class="chip" id="bSpeak">Read aloud</button>
+        <button class="chip" id="bPrint">Print</button>
+        <button class="chip" id="bSave">Save .html</button>
+        <button class="chip" id="bReset">Reset settings</button>
+      </div>
+      <p class="hint"><kbd>\</kbd> panel · <kbd>[</kbd><kbd>]</kbd> text size · <kbd>b</kbd> bionic · <kbd>f</kbd> focus · <kbd>r</kbd> ruler · <kbd>t</kbd> contents · <kbd>e</kbd> source. Drop a <code>.md</code> file anywhere to read it.</p>
+    </div>
+  </aside>
+
+  <main class="stage" id="stage">
+    <article class="reader hyphen" id="doc" data-rt="paper"></article>
+  </main>
+</div>
+
+<nav class="toc" id="toc"><h2>Contents</h2><div id="tocList"></div></nav>
+<div id="ruler"></div>
+<section class="src">
+  <header>Markdown source — edits render live</header>
+  <textarea id="srcText" spellcheck="false"></textarea>
+</section>
+<div class="drop">Drop your markdown file to read it</div>
+<input type="file" id="file" accept=".md,.markdown,.mdx,.txt,text/*" hidden>
+
+<script>
+const $ = s => document.querySelector(s);
+const doc = $('#doc'), stage = $('#stage');
+
+const SAMPLE = `# The Reading Desk
+
+A markdown file is *plain text with intentions*. This desk reads those intentions
+and sets them properly — then hands you the controls that Reader View keeps to itself.
+
+> Type wants a measure of about 66 characters. Everything else is negotiable.
+
+## What the sliders actually do
+
+| Control | Typographic name | Sensible range |
+| --- | --- | --- |
+| Text size | type size | 17–21px for long reads |
+| Line height | leading | 1.5–1.8 at body size |
+| Column width | measure | 45–75 characters |
+| Letter spacing | tracking | 0 for serif, a hair for caps |
+
+Small changes compound. Widening the measure without adding leading is the most
+common way a page becomes tiring to read.
+
+## Reading aids
+
+- **Bionic emphasis** bolds the opening of each word, so your eye lands on the shape rather than spelling it out.
+- **Focus dimming** fades everything except the block under your pointer.
+- **Reading ruler** draws a band that tracks your cursor — the paper-and-index-card trick.
+- **Drop cap** marks the opening the way a printed page would.
+
+### Keyboard
+
+\`\`\`text
+\\   toggle the settings panel
+[ ] text size down / up
+b   bionic emphasis
+f   focus dimming
+r   reading ruler
+t   contents
+e   source editor
+\`\`\`
+
+## Bringing your own file
+
+- [x] Drag a \`.md\` file onto the window
+- [x] Or press **Open .md**
+- [x] Or open **Source** and type — it renders as you go
+
+Everything you change is remembered in this browser, so the desk looks the same
+next time you sit down. Nothing leaves the page.
+
+---
+
+*Set in Literata, with Fraunces for headings.*
+`;
+
+/* ── state ─────────────────────────────────────────────────── */
+const DEF = {rt:'auto',font:'literata',fs:19,lh:1.72,me:66,ps:1.1,tr:0,ws:0,
+  bion:false,bs:40,focus:false,ruler:false,rh:44,just:false,hyph:true,cap:false,panel:true};
+let S = Object.assign({}, DEF);
+try{ Object.assign(S, JSON.parse(localStorage.getItem('reading-desk')||'{}')); }catch(e){}
+const save = () => { try{ localStorage.setItem('reading-desk', JSON.stringify(S)); }catch(e){} };
+
+const THEMES = [
+  {id:'auto',  label:'Auto',   bg:'linear-gradient(135deg,#FAFAF8 50%,#141715 50%)', fg:'#6A736F'},
+  {id:'paper', label:'Paper',  bg:'#FAFAF8', fg:'#6A736F'},
+  {id:'sepia', label:'Sepia',  bg:'#F4EBDC', fg:'#7E6B55'},
+  {id:'solar', label:'Solar',  bg:'#FDF6E3', fg:'#7E8E8E'},
+  {id:'night', label:'Night',  bg:'#141715', fg:'#8A9691'},
+  {id:'slate', label:'Slate',  bg:'#1A1E28', fg:'#8790A3'},
+  {id:'dusk',  label:'Dusk',   bg:'#241F2B', fg:'#9E90AB'},
+  {id:'mono',  label:'Ink',    bg:'#FFFFFF', fg:'#333333'}
+];
+const FONTS = [
+  {id:'literata', label:'Literata',  body:'"Literata",Georgia,serif',            head:'"Fraunces",Georgia,serif'},
+  {id:'fraunces', label:'Fraunces',  body:'"Fraunces",Georgia,serif',            head:'"Fraunces",Georgia,serif'},
+  {id:'plex',     label:'Plex Sans', body:'"IBM Plex Sans",system-ui,sans-serif', head:'"IBM Plex Sans",system-ui,sans-serif'},
+  {id:'atkinson', label:'Hyperlegible', body:'"Atkinson Hyperlegible",system-ui,sans-serif', head:'"Atkinson Hyperlegible",system-ui,sans-serif'},
+  {id:'mono',     label:'Plex Mono', body:'"IBM Plex Mono",ui-monospace,monospace', head:'"IBM Plex Mono",ui-monospace,monospace'},
+  {id:'system',   label:'System',    body:'ui-sans-serif,system-ui,sans-serif',  head:'ui-sans-serif,system-ui,sans-serif'}
+];
+
+/* ── build panel controls ──────────────────────────────────── */
+const themeBox = $('#themes');
+THEMES.forEach(t => {
+  const b = document.createElement('button');
+  b.className = 'sw'; b.dataset.id = t.id; b.textContent = t.label;
+  b.style.background = t.bg; b.style.color = t.fg; b.setAttribute('aria-pressed', S.rt === t.id);
+  b.onclick = () => { S.rt = t.id; applyTheme(); save(); };
+  themeBox.append(b);
+});
+const fontBox = $('#fonts');
+FONTS.forEach(f => {
+  const b = document.createElement('button');
+  b.className = 'chip'; b.dataset.id = f.id; b.textContent = f.label;
+  b.style.fontFamily = f.body; b.setAttribute('aria-pressed', S.font === f.id);
+  b.onclick = () => { S.font = f.id; applyType(); save(); };
+  fontBox.append(b);
+});
+
+function applyTheme(){
+  const dark = matchMedia('(prefers-color-scheme: dark)').matches;
+  doc.dataset.rt = S.rt === 'auto' ? (dark ? 'night' : 'paper') : S.rt;
+  themeBox.querySelectorAll('.sw').forEach(b => b.setAttribute('aria-pressed', b.dataset.id === S.rt));
+}
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (S.rt === 'auto') applyTheme(); });
+
+function applyType(){
+  const f = FONTS.find(x => x.id === S.font) || FONTS[0];
+  doc.style.setProperty('--body', f.body);
+  doc.style.setProperty('--head', f.head);
+  doc.style.setProperty('--fs', S.fs + 'px');
+  doc.style.setProperty('--lh', S.lh);
+  doc.style.setProperty('--measure', S.me + 'ch');
+  doc.style.setProperty('--ps', S.ps + 'em');
+  doc.style.setProperty('--tr', S.tr + 'em');
+  doc.style.setProperty('--ws', S.ws + 'em');
+  document.documentElement.style.setProperty('--rh', S.rh + 'px');
+  fontBox.querySelectorAll('.chip').forEach(b => b.setAttribute('aria-pressed', b.dataset.id === S.font));
+  $('#vFs').textContent = S.fs + 'px';
+  $('#vLh').textContent = S.lh.toFixed(2);
+  $('#vMe').textContent = S.me + 'ch';
+  $('#vPs').textContent = S.ps.toFixed(2) + 'em';
+  $('#vTr').textContent = S.tr.toFixed(3) + 'em';
+  $('#vWs').textContent = S.ws.toFixed(2) + 'em';
+  $('#vBs').textContent = S.bs + '%';
+  $('#vRh').textContent = S.rh + 'px';
+}
+const sliders = [['fs','fs',1],['lh','lh',0],['me','me',1],['ps','ps',0],['tr','tr',0],['ws','ws',0],['rh','rh',1],['bs','bs',1]];
+sliders.forEach(([el,key,int]) => {
+  const n = $('#'+el); n.value = S[key];
+  n.addEventListener('input', () => {
+    S[key] = int ? parseInt(n.value,10) : parseFloat(n.value);
+    applyType(); save();
+    if (key === 'bs' && S.bion) render();
+  });
+});
+
+function applyFlags(){
+  doc.classList.toggle('justify', S.just);
+  doc.classList.toggle('hyphen', S.hyph);
+  doc.classList.toggle('dropcap', S.cap);
+  doc.classList.toggle('focus', S.focus);
+  document.body.classList.toggle('ruler-on', S.ruler);
+  $('#app').classList.toggle('collapsed', !S.panel);
+  $('#bionRow').hidden = !S.bion;
+  $('#rulerRow').hidden = !S.ruler;
+  [['tBion','bion'],['tFocus','focus'],['tRuler','ruler'],['tJust','just'],['tHyph','hyph'],['tCap','cap']]
+    .forEach(([id,k]) => $('#'+id).setAttribute('aria-pressed', !!S[k]));
+}
+[['tBion','bion',true],['tFocus','focus'],['tRuler','ruler'],['tJust','just'],['tHyph','hyph'],['tCap','cap']]
+  .forEach(([id,k,rerender]) => $('#'+id).onclick = () => {
+    S[k] = !S[k]; applyFlags(); save(); if (rerender) render();
+  });
+$('#tPanel').onclick = () => { S.panel = !S.panel; applyFlags(); save(); };
+
+/* ── render ────────────────────────────────────────────────── */
+const embed = document.getElementById('embedded');
+const EMBEDDED = !!embed;
+let source = EMBEDDED ? embed.textContent.replace(/<\\\/script/gi, '</script')
+                      : (localStorage.getItem('reading-desk-doc') || SAMPLE);
+if (EMBEDDED && embed.dataset.name) $('#docname').textContent = embed.dataset.name;
+marked.setOptions({gfm:true, breaks:false});
+
+function bionify(root, pct){
+  const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode: n => n.parentElement.closest('pre,code,.bion') ? NodeFilter.FILTER_REJECT
+                   : (n.nodeValue.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT)
+  });
+  const nodes = []; while (walk.nextNode()) nodes.push(walk.currentNode);
+  nodes.forEach(n => {
+    const frag = document.createDocumentFragment();
+    n.nodeValue.split(/(\s+)/).forEach(tok => {
+      const m = tok.match(/^([A-Za-zÀ-ÿ'’]+)(.*)$/);
+      if (!m) { frag.append(document.createTextNode(tok)); return; }
+      const w = m[1], cut = Math.max(1, Math.round(w.length * pct / 100));
+      const b = document.createElement('b'); b.className = 'bion'; b.textContent = w.slice(0, cut);
+      frag.append(b, document.createTextNode(w.slice(cut) + m[2]));
+    });
+    n.parentNode.replaceChild(frag, n);
+  });
+}
+
+function render(){
+  const html = DOMPurify.sanitize(marked.parse(source));
+  doc.innerHTML = html;
+  doc.querySelectorAll('table').forEach(t => {
+    const w = document.createElement('div'); w.className = 'tablewrap';
+    t.parentNode.insertBefore(w, t); w.append(t);
+  });
+  doc.querySelectorAll('h1,h2,h3,h4').forEach((h,i) => h.id = h.id || 'h'+i);
+  if (S.bion) bionify(doc, S.bs);
+  buildToc();
+  const text = doc.textContent.trim();
+  const words = text ? text.split(/\s+/).length : 0;
+  $('#sWords').textContent = words.toLocaleString();
+  $('#sTime').textContent = Math.max(1, Math.round(words / 220));
+  const h1 = doc.querySelector('h1');
+  if (h1 && !EMBEDDED) $('#docname').textContent = h1.textContent;
+  onScroll();
+}
+
+function buildToc(){
+  const list = $('#tocList'); list.innerHTML = '';
+  doc.querySelectorAll('h1,h2,h3,h4').forEach(h => {
+    const a = document.createElement('a');
+    a.href = '#' + h.id; a.textContent = h.textContent;
+    a.className = 'lvl' + h.tagName[1];
+    a.onclick = e => { e.preventDefault(); h.scrollIntoView({block:'start'}); };
+    list.append(a);
+  });
+}
+
+/* ── scroll: progress, focus, active heading ───────────────── */
+function onScroll(){
+  const max = stage.scrollHeight - stage.clientHeight;
+  const pct = max > 0 ? Math.min(100, Math.round(stage.scrollTop / max * 100)) : 0;
+  $('#prog').style.width = pct + '%';
+  $('#sPct').textContent = pct;
+  let cur = null;
+  doc.querySelectorAll('h1,h2,h3,h4').forEach(h => {
+    if (h.getBoundingClientRect().top < 140) cur = h.id;
+  });
+  $('#tocList').querySelectorAll('a').forEach(a => a.classList.toggle('here', a.getAttribute('href') === '#'+cur));
+}
+stage.addEventListener('scroll', onScroll, {passive:true});
+addEventListener('resize', onScroll);
+
+stage.addEventListener('pointermove', e => {
+  if (S.ruler) $('#ruler').style.top = Math.max(0, e.clientY - S.rh/2) + 'px';
+  if (S.focus){
+    const blk = e.target.closest('#doc > *');
+    doc.querySelectorAll('.lit').forEach(n => n.classList.remove('lit'));
+    if (blk) blk.classList.add('lit');
+  }
+});
+
+/* ── files, source editor ──────────────────────────────────── */
+function load(text, name){
+  source = text;
+  $('#srcText').value = text;
+  if (name) $('#docname').textContent = name;
+  if (!EMBEDDED) try{ localStorage.setItem('reading-desk-doc', text); }catch(e){}
+  render(); stage.scrollTop = 0;
+}
+$('#bOpen').onclick = () => $('#file').click();
+$('#file').onchange = e => {
+  const f = e.target.files[0]; if (!f) return;
+  f.text().then(t => load(t, f.name));
+};
+['dragenter','dragover'].forEach(ev => addEventListener(ev, e => { e.preventDefault(); document.body.classList.add('dragging'); }));
+['dragleave','drop'].forEach(ev => addEventListener(ev, e => {
+  if (ev === 'dragleave' && e.relatedTarget) return;
+  document.body.classList.remove('dragging');
+}));
+addEventListener('drop', e => {
+  e.preventDefault();
+  const f = e.dataTransfer.files[0]; if (f) f.text().then(t => load(t, f.name));
+});
+let tmr;
+$('#srcText').addEventListener('input', e => {
+  clearTimeout(tmr);
+  tmr = setTimeout(() => { source = e.target.value;
+    if (!EMBEDDED) try{ localStorage.setItem('reading-desk-doc', source); }catch(err){}
+    render(); }, 220);
+});
+$('#tSrc').onclick = () => {
+  const on = document.body.classList.toggle('src-on');
+  $('#tSrc').setAttribute('aria-pressed', on);
+  if (on) $('#srcText').focus();
+};
+$('#tToc').onclick = () => {
+  const on = document.body.classList.toggle('toc-on');
+  $('#tToc').setAttribute('aria-pressed', on);
+};
+
+/* ── document actions ──────────────────────────────────────── */
+$('#bPrint').onclick = () => print();
+$('#bSpeak').onclick = () => {
+  const sy = window.speechSynthesis;
+  if (!sy) return;
+  if (sy.speaking) { sy.cancel(); $('#bSpeak').textContent = 'Read aloud'; return; }
+  const u = new SpeechSynthesisUtterance(doc.textContent);
+  u.rate = 1; u.onend = () => $('#bSpeak').textContent = 'Read aloud';
+  sy.speak(u); $('#bSpeak').textContent = 'Stop reading';
+};
+let saver = null;
+if (window.claude && claude.use) claude.use('downloads').then(d => saver = d).catch(() => {});
+$('#bSave').onclick = async () => {
+  const btn = $('#bSave');
+  const style = `body{background:${getComputedStyle(doc).backgroundColor||'#fff'};margin:0}`;
+  const out = `<!doctype html><meta charset="utf-8"><title>${($('#docname').textContent||'document')}</title>` +
+    `<style>${style}${document.querySelector('style').textContent}</style>` +
+    `<div class="stage"><article class="reader" style="${doc.getAttribute('style')||''}" data-rt="${doc.dataset.rt}">${doc.innerHTML}</article></div>`;
+  const name = ($('#docname').textContent || 'document').replace(/\W+/g,'-').toLowerCase() + '.html';
+  if (saver){
+    try { await saver.save({filename:name, data:new Blob([out])}); }
+    catch(err){ if (err && err.code !== 'declined'){ btn.textContent = 'Save unavailable'; setTimeout(() => btn.textContent = 'Save .html', 2200); } }
+    return;
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([out], {type:'text/html'}));
+  a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+};
+$('#bReset').onclick = () => { S = Object.assign({}, DEF); save(); applyTheme(); applyType(); applyFlags(); render(); };
+
+/* ── keyboard ──────────────────────────────────────────────── */
+addEventListener('keydown', e => {
+  if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT' || e.metaKey || e.ctrlKey) return;
+  const k = e.key;
+  if (k === '\\') { S.panel = !S.panel; applyFlags(); save(); }
+  else if (k === '[') { S.fs = Math.max(14, S.fs - 1); $('#fs').value = S.fs; applyType(); save(); }
+  else if (k === ']') { S.fs = Math.min(30, S.fs + 1); $('#fs').value = S.fs; applyType(); save(); }
+  else if (k === 'b') { S.bion = !S.bion; applyFlags(); save(); render(); }
+  else if (k === 'f') { S.focus = !S.focus; applyFlags(); save(); }
+  else if (k === 'r') { S.ruler = !S.ruler; applyFlags(); save(); }
+  else if (k === 't') { $('#tToc').click(); }
+  else if (k === 'e') { $('#tSrc').click(); }
+  else return;
+  e.preventDefault();
+});
+
+/* ── boot ──────────────────────────────────────────────────── */
+$('#srcText').value = source;
+applyTheme(); applyType(); applyFlags(); render();
+</script>
