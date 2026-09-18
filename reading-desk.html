@@ -362,7 +362,9 @@ FONTS.forEach(f => {
 
 function applyTheme(){
   const dark = matchMedia('(prefers-color-scheme: dark)').matches;
-  doc.dataset.rt = S.rt === 'auto' ? (dark ? 'night' : 'paper') : S.rt;
+  const rt = S.rt === 'auto' ? (dark ? 'night' : 'paper') : S.rt;
+  document.documentElement.dataset.rt = rt;
+  doc.dataset.rt = rt;
   themeBox.querySelectorAll('.sw').forEach(b => b.setAttribute('aria-pressed', b.dataset.id === S.rt));
 }
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (S.rt === 'auto') applyTheme(); });
@@ -557,10 +559,10 @@ let saver = null;
 if (window.claude && claude.use) claude.use('downloads').then(d => saver = d).catch(() => {});
 $('#bSave').onclick = async () => {
   const btn = $('#bSave');
-  const style = `body{background:${getComputedStyle(doc).backgroundColor||'#fff'};margin:0}`;
+  const style = `body{background:${getComputedStyle(stage).backgroundColor||'#fff'};margin:0}.stage{min-height:100vh;padding:1px 0}`;
   const out = `<!doctype html><meta charset="utf-8"><title>${($('#docname').textContent||'document')}</title>` +
     `<style>${style}${document.querySelector('style').textContent}</style>` +
-    `<div class="stage"><article class="reader" style="${doc.getAttribute('style')||''}" data-rt="${doc.dataset.rt}">${doc.innerHTML}</article></div>`;
+    `<div class="stage" data-rt="${doc.dataset.rt}"><article class="reader" style="${doc.getAttribute('style')||''}">${doc.innerHTML}</article></div>`;
   const name = ($('#docname').textContent || 'document').replace(/\W+/g,'-').toLowerCase() + '.html';
   if (saver){
     try { await saver.save({filename:name, data:new Blob([out])}); }
