@@ -1,42 +1,24 @@
-﻿# Markdown Reading Desk uninstaller
+﻿# Markdown Reading Desk, uninstall
 #
 #   powershell -ExecutionPolicy Bypass -File uninstall.ps1
 #
-# Unregisters the .md handler, restores whatever .md pointed at before, and
-# removes the Start Menu entry. The install folder is left in place so nothing
-# is deleted behind your back. The path is printed at the end.
+# Unregisters the .md handler, puts back whatever .md pointed at before, and
+# removes the Start Menu entry. The install folder is left alone so nothing is
+# deleted behind your back. The path is printed at the end.
+#
+# The installed app can do this itself: ReadingDesk.exe --uninstall
 
-param(
-  [string]$Dest
-)
+$ErrorActionPreference = 'Stop'
 
-# Find the install folder from the registration, so this works wherever it went.
-$app = $Dest
-if (-not $app) {
-  $reg = (Get-ItemProperty 'HKCU:\Software\Classes\Applications\ReadingDesk.exe\shell\open\command' `
-          -ErrorAction SilentlyContinue).'(default)'
-  if ($reg -match '^"([^"]+)"') { $app = Split-Path -Parent $matches[1] }
+$cmd = (Get-ItemProperty 'HKCU:\Software\Classes\Applications\ReadingDesk.exe\shell\open\command' `
+        -ErrorAction SilentlyContinue).'(default)'
+$exe = $null
+if ($cmd -match '^"([^"]+)"') { $exe = $matches[1] }
+if (-not $exe -or -not (Test-Path $exe)) {
+  $local = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) 'dist\ReadingDesk.exe'
+  if (Test-Path $local) { $exe = $local }
 }
-if (-not $app) { $app = Join-Path $env:LOCALAPPDATA 'ReadingDesk' }
+if (-not $exe) { throw 'Could not find ReadingDesk.exe. Run build.ps1 first, or pass the path yourself.' }
 
-Remove-Item 'HKCU:\Software\Classes\ReadingDesk.md' -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item 'HKCU:\Software\Classes\Applications\ReadingDesk.exe' -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item 'HKCU:\Software\ReadingDesk' -Recurse -Force -ErrorAction SilentlyContinue
-Remove-ItemProperty 'HKCU:\Software\RegisteredApplications' -Name 'Markdown Reading Desk' -Force -ErrorAction SilentlyContinue
-Remove-ItemProperty 'HKCU:\Software\Classes\.md\OpenWithProgids' -Name 'ReadingDesk.md' -Force -ErrorAction SilentlyContinue
-
-$json = Join-Path $app 'previous-md-association.json'
-if (Test-Path $json) {
-  $prev = (Get-Content -Raw $json | ConvertFrom-Json).previous_md_progid
-  if ($prev) { Set-ItemProperty 'HKCU:\Software\Classes\.md' '(default)' $prev }
-}
-
-$bak = Join-Path $app 'backup-FileExts-md.reg'
-if (Test-Path $bak) { reg import $bak | Out-Null }
-
-Remove-Item (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Markdown Reading Desk.lnk') `
-  -Force -ErrorAction SilentlyContinue
-
-Write-Host "Unregistered." -ForegroundColor Green
-Write-Host "Delete the folder yourself when you're ready: $app"
-Write-Host "You may need to pick your preferred .md app once via right-click > Open with."
+& $exe --uninstall --silent
+Write-Host "Unregistered. The files in $(Split-Path -Parent $exe) are still there; delete them when ready."

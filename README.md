@@ -58,31 +58,37 @@ e   source editor (type markdown, it renders live)
 
 ## Install (Windows, no admin rights)
 
+Grab **ReadingDesk.exe** from the [latest release](https://github.com/alienware377/markdown-reading-desk/releases/latest)
+and double-click it. A small setup window opens: pick a folder, press Install.
+It is unsigned, so SmartScreen will ask first; choose *More info*, then *Run anyway*.
+
+That one file is the whole app. It installs a copy of itself, unpacks the
+reader beside it, draws its icon, adds a Start Menu entry, and registers as a
+handler for `.md`. Nothing is written outside your own user account.
+
+**One step is yours.** Windows 11 protects the default-app choice with a hash,
+so no installer, this one included, may set it for you:
+
+> right-click any `.md` file, choose **Open with**, then *Choose another app*,
+> pick **Markdown Reading Desk**, and tick **Always use this app**
+
+To uninstall, run the setup window again and press Uninstall, or:
+
+```powershell
+& "$env:LOCALAPPDATA\ReadingDesk\ReadingDesk.exe" --uninstall
+```
+
+### From source
+
 ```powershell
 git clone https://github.com/alienware377/markdown-reading-desk.git
 cd markdown-reading-desk
 powershell -ExecutionPolicy Bypass -File install.ps1
 ```
 
-That puts `ReadingDesk.exe` in `%LOCALAPPDATA%\ReadingDesk`, adds a Start Menu
-entry, and registers the app as a handler for `.md`. Pass `-Dest` to put it
-somewhere else:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File install.ps1 -Dest "G:\Programs\ReadingDesk"
-```
-
-**One step is yours.** Windows 11 protects the default-app choice with a hash,
-so no installer, this one included, may set it for you:
-
-> right-click any `.md` → **Open with** → *Choose another app* →
-> **Markdown Reading Desk** → tick **Always use this app**
-
-To undo everything, including putting the old `.md` association back:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\ReadingDesk\uninstall.ps1"
-```
+`build.ps1` alone produces `dist\ReadingDesk.exe` without installing anything.
+Pass `-Dest` to `install.ps1` to choose the folder. Both need .NET Framework
+4.x, which ships with Windows.
 
 ## Use it without installing
 
@@ -106,12 +112,11 @@ the page makes. Offline, it falls back to system fonts and shows the raw text.
 
 ```text
 reading-desk.html   the reader: all the CSS, all the controls, one file
-src/ReadingDesk.cs  the launcher Explorer calls
-install.ps1         wraps the reader, draws the icon, compiles, registers
+src/ReadingDesk.cs  the app: reader, setup window, and .md registration
+build.ps1           compiles the two into dist\ReadingDesk.exe
+install.ps1         builds, then runs the installer
 uninstall.ps1       puts everything back
 ```
-
-`install.ps1` needs .NET Framework 4.x, which ships with Windows.
 
 ## License
 
