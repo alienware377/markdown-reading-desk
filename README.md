@@ -1,7 +1,7 @@
 # Markdown Reading Desk
 
 A single-file markdown reader with the reading-mode controls iOS keeps to itself.
-Double-click a `.md` file, get a properly typeset page — then tune the tint,
+Double-click a `.md` file, get a properly typeset page, then tune the tint,
 the typeface, the measure, and the reading aids until it's comfortable.
 
 No build step, no dependencies to install, no server, nothing phoning home.
@@ -11,13 +11,13 @@ One HTML file plus a ~13 KB launcher.
 
 ## What you can change
 
-**Page tint** — Auto (follows your system theme), Paper, Sepia, Solar, Night,
+**Page tint.** Auto (follows your system theme), Paper, Sepia, Solar, Night,
 Slate, Dusk, and a high-contrast Ink.
 
-**Typeface** — Literata, Fraunces, IBM Plex Sans, Atkinson Hyperlegible
+**Typeface.** Literata, Fraunces, IBM Plex Sans, Atkinson Hyperlegible
 (designed for low vision), IBM Plex Mono, or your system sans.
 
-**Measure and rhythm** — every one of these is a slider, not a preset:
+**Measure and rhythm.** Every one of these is a slider, not a preset:
 
 | Control | Typographic name | Sensible range |
 | --- | --- | --- |
@@ -30,14 +30,14 @@ Slate, Dusk, and a high-contrast Ink.
 
 **Reading aids**
 
-- **Bionic emphasis** — bolds the opening of each word so the eye lands on the
+- **Bionic emphasis** bolds the opening of each word so the eye lands on the
   shape instead of spelling it out. Strength is adjustable, 20–70%.
-- **Focus dimming** — everything fades except the block under your pointer.
-- **Reading ruler** — a band that tracks your cursor, the index-card trick.
+- **Focus dimming** fades everything except the block under your pointer.
+- **Reading ruler**, a band that tracks your cursor, the index-card trick.
 - **Justified text** and **hyphenation**, which belong together.
-- **Drop cap** — marks the opening the way a printed page would.
+- **Drop cap** marks the opening the way a printed page would.
 
-**Along the way** — a contents sidebar built from the headings, a progress
+**Along the way**, a contents sidebar built from the headings, a progress
 line, live word count and reading time, read-aloud via the browser's speech
 voice, print, and save-as-styled-HTML.
 
@@ -73,7 +73,7 @@ powershell -ExecutionPolicy Bypass -File install.ps1 -Dest "G:\Programs\ReadingD
 ```
 
 **One step is yours.** Windows 11 protects the default-app choice with a hash,
-so no installer — this one included — may set it for you:
+so no installer, this one included, may set it for you:
 
 > right-click any `.md` → **Open with** → *Choose another app* →
 > **Markdown Reading Desk** → tick **Always use this app**
@@ -100,12 +100,12 @@ browser is present it falls back to your default one.
 Markdown is parsed by [marked](https://github.com/markedjs/marked) and
 sanitized with [DOMPurify](https://github.com/cure53/DOMPurify), both loaded
 from cdnjs. Fonts come from Google Fonts. Those are the only network requests
-the page makes — offline, it falls back to system fonts and shows the raw text.
+the page makes. Offline, it falls back to system fonts and shows the raw text.
 
 ## Layout
 
 ```text
-reading-desk.html   the reader — all the CSS, all the controls, one file
+reading-desk.html   the reader: all the CSS, all the controls, one file
 src/ReadingDesk.cs  the launcher Explorer calls
 install.ps1         wraps the reader, draws the icon, compiles, registers
 uninstall.ps1       puts everything back
@@ -115,4 +115,4 @@ uninstall.ps1       puts everything back
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE).

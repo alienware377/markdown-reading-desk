@@ -1,10 +1,10 @@
-﻿# Markdown Reading Desk — uninstaller
+﻿# Markdown Reading Desk uninstaller
 #
 #   powershell -ExecutionPolicy Bypass -File uninstall.ps1
 #
 # Unregisters the .md handler, restores whatever .md pointed at before, and
 # removes the Start Menu entry. The install folder is left in place so nothing
-# is deleted behind your back — the path is printed at the end.
+# is deleted behind your back. The path is printed at the end.
 
 param(
   [string]$Dest

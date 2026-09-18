@@ -1,4 +1,4 @@
-﻿# Markdown Reading Desk — installer (per-user, no admin rights needed)
+﻿# Markdown Reading Desk installer (per-user, no admin rights needed)
 #
 #   powershell -ExecutionPolicy Bypass -File install.ps1
 #   powershell -ExecutionPolicy Bypass -File install.ps1 -Dest "G:\Programs\ReadingDesk"
@@ -6,7 +6,7 @@
 # Installs to %LOCALAPPDATA%\ReadingDesk unless -Dest says otherwise, adds a
 # Start Menu entry, and registers itself as a handler for .md files. Windows 11
 # hash-protects the *default* app choice, so the final "always use this app"
-# pick has to be made by hand — the script prints the steps when it finishes.
+# pick has to be made by hand. The script prints the steps when it finishes.
 
 param(
   [string]$Dest = (Join-Path $env:LOCALAPPDATA 'ReadingDesk')
@@ -70,7 +70,7 @@ $bw.Dispose()
 
 # ── viewer.html: standalone wrapper around the reader, with an embed slot ─────
 # The reader runs in a browser app window, so the taskbar and title bar take
-# their icon from the page's favicon — the same artwork, inlined.
+# their icon from the page's favicon, so we inline the same artwork.
 $slot = '<script type="text/markdown" id="embedded" data-name="<!--NAME-->"><!--EMBED--></script>' + "`r`n"
 $body = Get-Content -Raw -Encoding UTF8 (Join-Path $here 'reading-desk.html')
 if ($body -notmatch '<div class="app" id="app">') { throw 'reading-desk.html is missing its app anchor' }
@@ -166,7 +166,7 @@ Write-Host ""
 Write-Host "Installed to $app" -ForegroundColor Green
 Write-Host "Start Menu:  Markdown Reading Desk"
 Write-Host ""
-Write-Host "One step left — Windows won't let a script set the default app:" -ForegroundColor Yellow
+Write-Host "One step left. Windows won't let a script set the default app:" -ForegroundColor Yellow
 Write-Host "  right-click any .md  ->  Open with  ->  Choose another app"
 Write-Host "  ->  Markdown Reading Desk  ->  tick 'Always use this app'"
 Write-Host ""
