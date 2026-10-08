@@ -20,6 +20,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
 using System.Text;
 using System.Windows.Forms;
 using Microsoft.Win32;
@@ -124,6 +125,81 @@ static class App {
     }
 }
 
+// ------------------------------------------------------- long path handling
+//
+// Windows hands a handler whatever path it has, and .NET Framework refuses
+// anything whose expanded form passes 260 characters. It expands 8.3 short
+// names before measuring, so the short form Explorer falls back to is refused
+// as well. Go round it: ask Win32 for the full path, prefix it with \\?\, and
+// open the file by handle. Works whatever the long-path registry setting is.
+
+static class LongPath {
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern int GetFullPathNameW(string name, int bufLen, StringBuilder buf, IntPtr filePart);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern uint GetFileAttributesW(string name);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern SafeFileHandle CreateFileW(string name, uint access, uint share, IntPtr sec,
+                                             uint disposition, uint flags, IntPtr template);
+
+    const uint GENERIC_READ = 0x80000000;
+    const uint FILE_SHARE_READ_WRITE_DELETE = 0x00000007;
+    const uint OPEN_EXISTING = 3;
+    const uint INVALID_ATTRIBUTES = 0xFFFFFFFF;
+    const uint FILE_ATTRIBUTE_DIRECTORY = 0x10;
+
+    /// Full path with the \\?\ prefix, so Win32 skips its own MAX_PATH check.
+    public static string Extended(string path) {
+        if (path.StartsWith(@"\\?\")) return path;
+
+        StringBuilder buf = new StringBuilder(32768);
+        int n = GetFullPathNameW(path, buf.Capacity, buf, IntPtr.Zero);
+        string full = (n > 0 && n < buf.Capacity) ? buf.ToString() : path;
+
+        if (full.StartsWith(@"\\")) return @"\\?\UNC\" + full.Substring(2);
+        return @"\\?\" + full;
+    }
+
+    public static bool FileExists(string path) {
+        uint a = GetFileAttributesW(Extended(path));
+        return a != INVALID_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY) == 0;
+    }
+
+    public static string ReadAllText(string path) {
+        using (SafeFileHandle h = CreateFileW(Extended(path), GENERIC_READ,
+                   FILE_SHARE_READ_WRITE_DELETE, IntPtr.Zero, OPEN_EXISTING, 0, IntPtr.Zero)) {
+            if (h.IsInvalid) throw new IOException(
+                "Could not open the file (error " + Marshal.GetLastWin32Error() + ").");
+            using (FileStream fs = new FileStream(h, FileAccess.Read))
+            using (StreamReader r = new StreamReader(fs, Encoding.UTF8, true))
+                return r.ReadToEnd();
+        }
+    }
+
+    /// Path.GetFileName measures the path first, so do the split by hand.
+    public static string FileName(string path) {
+        int i = path.LastIndexOfAny(new char[] { '\\', '/' });
+        return i < 0 ? path : path.Substring(i + 1);
+    }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern int GetLongPathNameW(string name, StringBuilder buf, int bufLen);
+
+    /// Explorer falls back to 8.3 names on long paths, and COWFIT~1.MD is a
+    /// poor title. Ask Windows for the real one.
+    public static string DisplayName(string path) {
+        try {
+            StringBuilder buf = new StringBuilder(32768);
+            int n = GetLongPathNameW(Extended(path), buf, buf.Capacity);
+            if (n > 0 && n < buf.Capacity) return FileName(buf.ToString());
+        } catch { }
+        return FileName(path);
+    }
+}
+
 // ---------------------------------------------------------------- the reader
 
 static class Reader {
@@ -139,13 +215,18 @@ static class Reader {
             md = Welcome;
             name = "no file open";
         } else {
-            if (!File.Exists(path)) {
+            if (!LongPath.FileExists(path)) {
                 MessageBox.Show("That file isn't there any more:\r\n\r\n" + path, App.Title,
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
-            md = File.ReadAllText(path);
-            name = Path.GetFileName(path);
+            try { md = LongPath.ReadAllText(path); }
+            catch (Exception ex) {
+                MessageBox.Show("Could not read that file:\r\n\r\n" + path + "\r\n\r\n" + ex.Message,
+                    App.Title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            name = LongPath.DisplayName(path);
         }
 
         string tplPath = Path.Combine(dir, "viewer.html");
@@ -221,7 +302,7 @@ static class Installer {
 
         string exe = Path.Combine(dest, App.ExeName);
         if (!string.Equals(exe, App.SelfPath, StringComparison.OrdinalIgnoreCase))
-            File.Copy(App.SelfPath, exe, true);
+            CopyOverLive(App.SelfPath, exe);
 
         byte[] png = Artwork.PagePng(256);
         string icoPath = Path.Combine(dest, "ReadingDesk.ico");
@@ -233,6 +314,20 @@ static class Installer {
         Register(exe, icoPath);
         MakeShortcut(exe, icoPath);
         App.RefreshShell();
+    }
+
+    /// A reader window keeps the old exe locked, so move it aside and copy
+    /// over the gap. The leftover is cleaned up on the next install.
+    static void CopyOverLive(string from, string to) {
+        try { File.Copy(from, to, true); return; }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+
+        string parked = to + ".old";
+        try { File.Delete(parked); } catch { }
+        File.Move(to, parked);
+        File.Copy(from, to, true);
+        try { File.Delete(parked); } catch { }
     }
 
     public static string Uninstall() {
