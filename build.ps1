@@ -18,7 +18,7 @@ if (-not (Test-Path $csc)) { throw "C# compiler not found at $csc (.NET Framewor
 
 $src  = Join-Path $here 'src\ReadingDesk.cs'
 $page = Join-Path $here 'reading-desk.html'
-$refs = @('/reference:System.Windows.Forms.dll', '/reference:System.Drawing.dll')
+$refs = @('/reference:System.Windows.Forms.dll', '/reference:System.Drawing.dll', '/reference:System.Web.Extensions.dll')
 
 # pass 1: staging build, used only to draw the icon
 $stage = Join-Path $obj 'stage.exe'

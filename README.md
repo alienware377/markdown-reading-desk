@@ -44,6 +44,27 @@ voice, print, and save-as-styled-HTML.
 Everything you change is kept in the browser's local storage, so the desk looks
 the same next time you sit down.
 
+## JSON Lines
+
+`.jsonl` files open too.
+
+**Chat logs** (JSONL where each line is a `user` or `assistant` record with a
+`message`) read as a clean conversation: what you asked, what came back, with
+times and a divider for each new day. Tool calls, tool output, hidden
+reasoning, background notices and bookkeeping records are left out. Slash
+commands show as a short line of their own, attached images as a note. The
+contents sidebar lists what you asked, so a long session is easy to jump
+around.
+
+Big logs are trimmed before they reach the page. A 126 MB session opens in
+about a second as a 400 KB page, because almost all of that size is tool
+output nobody reads.
+
+**Any other JSONL** reads as records: a table when every line is a flat object
+with a handful of fields, otherwise one labelled block per line with nested
+values laid out underneath. Lines that are not valid JSON are skipped and
+counted.
+
 ## Keyboard
 
 ```text

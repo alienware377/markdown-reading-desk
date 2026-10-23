@@ -13,6 +13,7 @@
 // the final "always use this app" pick is left to the person installing.
 
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
@@ -22,6 +23,7 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 using System.Text;
+using System.Web.Script.Serialization;
 using System.Windows.Forms;
 using Microsoft.Win32;
 
@@ -30,6 +32,8 @@ static class App {
     public const string ProgId   = "ReadingDesk.md";
     public const string ExeName  = "ReadingDesk.exe";
     public const string TypeName = "Markdown Document";
+    public const string JsonlProgId   = "ReadingDesk.jsonl";
+    public const string JsonlTypeName = "JSON Lines Document";
     public const string Blurb    = "Read markdown files with reading-mode controls";
 
     public static string DefaultDir {
@@ -200,6 +204,103 @@ static class LongPath {
     }
 }
 
+// ----------------------------------------------------------------- JSON Lines
+//
+// A chat log in JSONL carries every tool call, file read and command output
+// alongside what was actually said, and can run past 100 MB. The page only
+// shows the spoken turns, so trim the rest here first: the browser then gets
+// a few hundred KB instead. The output keeps the same record shape, so the
+// page reads it exactly as it would the original. Any JSONL that is not a
+// chat log is passed through untouched.
+
+static class Jsonl {
+
+    public static bool IsJsonlName(string name) {
+        string n = name.ToLowerInvariant();
+        return n.EndsWith(".jsonl") || n.EndsWith(".ndjson");
+    }
+
+    static object Get(Dictionary<string, object> d, string k) {
+        object v; return d.TryGetValue(k, out v) ? v : null;
+    }
+    static bool Flag(Dictionary<string, object> d, string k) {
+        object v = Get(d, k); return v is bool && (bool)v;
+    }
+
+    public static string Slim(string text) {
+        JavaScriptSerializer js = new JavaScriptSerializer();
+        js.MaxJsonLength = int.MaxValue;
+        js.RecursionLimit = 512;
+
+        StringBuilder sb = new StringBuilder();
+        int chatRecords = 0;
+
+        using (StringReader r = new StringReader(text)) {
+            string line;
+            while ((line = r.ReadLine()) != null) {
+                // Cheap checks first, so the big tool-output lines are never parsed.
+                if (line.Length == 0) continue;
+                bool maybeTitle = line.IndexOf("-title\"", StringComparison.Ordinal) >= 0;
+                if (!maybeTitle &&
+                    line.IndexOf("\"user\"", StringComparison.Ordinal) < 0 &&
+                    line.IndexOf("\"assistant\"", StringComparison.Ordinal) < 0) continue;
+                // Tool output with no text block anywhere in the line cannot hold anything
+                // said. Matched unescaped, so a quote of these words inside a message never trips it.
+                if (!maybeTitle &&
+                    line.IndexOf("\"type\":\"tool_result\"", StringComparison.Ordinal) >= 0 &&
+                    line.IndexOf("\"type\":\"text\"", StringComparison.Ordinal) < 0) { chatRecords++; continue; }
+
+                Dictionary<string, object> o;
+                try { o = js.DeserializeObject(line) as Dictionary<string, object>; }
+                catch { continue; }
+                if (o == null) continue;
+
+                string type = Get(o, "type") as string;
+                if (type == "custom-title" || type == "ai-title") { sb.Append(line).Append('\n'); continue; }
+                if (type != "user" && type != "assistant") continue;
+
+                Dictionary<string, object> msg = Get(o, "message") as Dictionary<string, object>;
+                if (msg == null) continue;
+                chatRecords++;
+                if (Flag(o, "isSidechain") || Flag(o, "isMeta") || Flag(o, "isApiErrorMessage")) continue;
+
+                object content = Get(msg, "content"), kept;
+                if (content is string) kept = content;
+                else if (content is object[]) {
+                    List<object> blocks = new List<object>();
+                    foreach (object b in (object[])content) {
+                        Dictionary<string, object> d = b as Dictionary<string, object>;
+                        if (d == null) continue;
+                        string bt = Get(d, "type") as string;
+                        if (bt == "text") {
+                            Dictionary<string, object> t = new Dictionary<string, object>();
+                            t["type"] = "text"; t["text"] = Get(d, "text");
+                            blocks.Add(t);
+                        } else if (bt == "image") {
+                            Dictionary<string, object> im = new Dictionary<string, object>();
+                            im["type"] = "image";
+                            blocks.Add(im);
+                        }
+                    }
+                    if (blocks.Count == 0) continue;
+                    kept = blocks.ToArray();
+                } else continue;
+
+                Dictionary<string, object> m = new Dictionary<string, object>();
+                m["role"] = Get(msg, "role") ?? type;
+                m["content"] = kept;
+                Dictionary<string, object> slim = new Dictionary<string, object>();
+                slim["type"] = type;
+                slim["timestamp"] = Get(o, "timestamp");
+                slim["message"] = m;
+                if (Flag(o, "isCompactSummary")) slim["isCompactSummary"] = true;
+                sb.Append(js.Serialize(slim)).Append('\n');
+            }
+        }
+        return chatRecords > 0 ? sb.ToString() : text;
+    }
+}
+
 // ---------------------------------------------------------------- the reader
 
 static class Reader {
@@ -227,13 +328,15 @@ static class Reader {
                 return;
             }
             name = LongPath.DisplayName(path);
+            if (Jsonl.IsJsonlName(name)) md = Jsonl.Slim(md);
         }
 
         string tplPath = Path.Combine(dir, "viewer.html");
-        string tpl = File.Exists(tplPath) ? File.ReadAllText(tplPath) : Installer.BuildViewer();
+        string tpl = File.Exists(tplPath) ? File.ReadAllText(tplPath) : "";
+        if (!tpl.Contains("data-enc=\"base64\"")) tpl = Installer.BuildViewer();   // older install
 
         string html = tpl
-            .Replace("<!--EMBED-->", md.Replace("</script", "<\\/script"))
+            .Replace("<!--EMBED-->", Convert.ToBase64String(new UTF8Encoding(false).GetBytes(md)))
             .Replace("<!--NAME-->", name.Replace("&", "&amp;").Replace("\"", "&quot;"));
 
         string outDir = Path.Combine(dir, "open");
@@ -335,6 +438,7 @@ static class Installer {
         if (dir.Length == 0) dir = Path.GetDirectoryName(App.SelfPath);
 
         Registry.CurrentUser.DeleteSubKeyTree(@"Software\Classes\" + App.ProgId, false);
+        Registry.CurrentUser.DeleteSubKeyTree(@"Software\Classes\" + App.JsonlProgId, false);
         Registry.CurrentUser.DeleteSubKeyTree(@"Software\Classes\Applications\" + App.ExeName, false);
         Registry.CurrentUser.DeleteSubKeyTree(@"Software\ReadingDesk", false);
 
@@ -343,6 +447,8 @@ static class Installer {
 
         using (RegistryKey k = Registry.CurrentUser.OpenSubKey(@"Software\Classes\.md\OpenWithProgids", true))
             if (k != null) try { k.DeleteValue(App.ProgId, false); } catch { }
+        using (RegistryKey k = Registry.CurrentUser.OpenSubKey(@"Software\Classes\.jsonl\OpenWithProgids", true))
+            if (k != null) try { k.DeleteValue(App.JsonlProgId, false); } catch { }
 
         // put back whatever .md pointed at before
         string note = Path.Combine(dir, "previous-md-progid.txt");
@@ -385,8 +491,23 @@ static class Installer {
             k.SetValue(null, icoPath + ",0");
         using (RegistryKey k = Registry.CurrentUser.CreateSubKey(ak + @"\shell\open\command"))
             k.SetValue(null, cmd);
-        using (RegistryKey k = Registry.CurrentUser.CreateSubKey(ak + @"\SupportedTypes"))
+        using (RegistryKey k = Registry.CurrentUser.CreateSubKey(ak + @"\SupportedTypes")) {
             k.SetValue(".md", "");
+            k.SetValue(".jsonl", "");
+        }
+
+        // .jsonl gets its own file type, offered in Open with but never forced:
+        // whatever already opens .jsonl keeps doing so until the person picks.
+        using (RegistryKey k = Registry.CurrentUser.CreateSubKey(@"Software\Classes\" + App.JsonlProgId)) {
+            k.SetValue(null, App.JsonlTypeName);
+            k.SetValue("FriendlyTypeName", App.JsonlTypeName);
+        }
+        using (RegistryKey k = Registry.CurrentUser.CreateSubKey(@"Software\Classes\" + App.JsonlProgId + @"\DefaultIcon"))
+            k.SetValue(null, icoPath + ",0");
+        using (RegistryKey k = Registry.CurrentUser.CreateSubKey(@"Software\Classes\" + App.JsonlProgId + @"\shell\open\command"))
+            k.SetValue(null, cmd);
+        using (RegistryKey k = Registry.CurrentUser.CreateSubKey(@"Software\Classes\.jsonl\OpenWithProgids"))
+            k.SetValue(App.JsonlProgId, new byte[0], RegistryValueKind.None);
 
         // listed as a real app, so Settings can offer it under Default apps
         using (RegistryKey k = Registry.CurrentUser.CreateSubKey(@"Software\ReadingDesk\Capabilities")) {
@@ -394,8 +515,10 @@ static class Installer {
             k.SetValue("ApplicationDescription", App.Blurb);
             k.SetValue("ApplicationIcon", icoPath + ",0");
         }
-        using (RegistryKey k = Registry.CurrentUser.CreateSubKey(@"Software\ReadingDesk\Capabilities\FileAssociations"))
+        using (RegistryKey k = Registry.CurrentUser.CreateSubKey(@"Software\ReadingDesk\Capabilities\FileAssociations")) {
             k.SetValue(".md", App.ProgId);
+            k.SetValue(".jsonl", App.JsonlProgId);
+        }
         using (RegistryKey k = Registry.CurrentUser.CreateSubKey(@"Software\RegisteredApplications"))
             k.SetValue(App.Title, @"Software\ReadingDesk\Capabilities");
 
@@ -433,7 +556,9 @@ static class Installer {
                "One step is yours. Windows protects the default-app choice, so no " +
                "installer can set it for you.\r\n\r\n" +
                "Right-click any .md file, choose Open with, then Choose another app, " +
-               "pick " + App.Title + ", and tick Always use this app.";
+               "pick " + App.Title + ", and tick Always use this app.\r\n\r\n" +
+               "It opens .jsonl files too. Use Open with the same way if you want " +
+               "them to open here by default.";
     }
 
     // ---- the reader page -------------------------------------------------
@@ -448,7 +573,7 @@ static class Installer {
             reader = r.ReadToEnd();
 
         const string anchor = "<div class=\"app\" id=\"app\">";
-        string slot = "<script type=\"text/markdown\" id=\"embedded\" " +
+        string slot = "<script type=\"text/markdown\" id=\"embedded\" data-enc=\"base64\" " +
                       "data-name=\"<!--NAME-->\"><!--EMBED--></script>\r\n";
         reader = reader.Replace(anchor, slot + anchor);
 

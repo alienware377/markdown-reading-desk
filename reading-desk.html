@@ -129,6 +129,27 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--c-sunk);border:1px
 .reader th{font-family:var(--ui);font-size:.85em;letter-spacing:.06em;text-transform:uppercase;color:var(--r-mute);font-weight:600}
 .reader .fallback{color:var(--r-mute);font-size:.85em;border-left:2px solid var(--r-accent);padding-left:.8em}
 .reader mark{background:var(--r-mark);color:inherit;padding:0 .12em}
+
+/* conversations and records read from JSON Lines */
+.reader .chat-meta{color:var(--r-mute);font-family:var(--ui);font-size:.78em;letter-spacing:.04em;margin-top:-.3em}
+.reader .chat-day{display:flex;align-items:center;gap:.9em;color:var(--r-mute);font-family:var(--ui);
+  font-size:.7em;letter-spacing:.14em;text-transform:uppercase;margin:2.4em 0 1.3em}
+.reader .chat-day::before,.reader .chat-day::after{content:"";flex:1;border-top:1px solid var(--r-line)}
+.reader .chat-note{color:var(--r-mute);font-style:italic;font-size:.88em}
+.reader .turn>*{margin:0 0 .75em}
+.reader .turn>*:last-child{margin-bottom:0}
+.reader .turn .who{font-family:var(--ui);font-size:.68em;font-weight:600;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--r-mute);margin-bottom:.55em}
+.reader .turn .who time{font-weight:400;letter-spacing:.04em;margin-left:.6em;font-variant-numeric:tabular-nums}
+.reader .turn.you{background:var(--r-code);border-radius:12px;padding:.95em 1.15em}
+.reader .turn.you .who{color:var(--r-accent)}
+.reader .turn.you code,.reader .turn.you pre{background:var(--r-bg)}
+.reader .turn h1,.reader .turn h2{font-size:1.16em;border:0;padding:0;margin:1.3em 0 .45em}
+.reader .turn h3,.reader .turn h4{font-size:1em;margin:1.1em 0 .35em}
+.reader .rec-fields{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:.3em 1.1em;margin:0}
+.reader .rec-fields dt{font-family:var(--ui);font-size:.78em;color:var(--r-mute);padding-top:.2em}
+.reader .rec-fields dd{margin:0;overflow-wrap:anywhere}
+.reader .rec-fields .rec-fields{font-size:.92em}
 .reader img{max-width:100%;border-radius:8px}
 .reader input[type=checkbox]{accent-color:var(--r-accent);margin-right:.4em}
 .reader ul:has(input[type=checkbox]){list-style:none;padding-left:.2em}
@@ -194,7 +215,7 @@ body.dragging .drop{display:flex}
     <div class="tools">
       <button class="btn" id="tToc" aria-pressed="false">Contents</button>
       <button class="btn" id="tSrc" aria-pressed="false">Source</button>
-      <button class="btn" id="bOpen">Open .md</button>
+      <button class="btn" id="bOpen">Open file</button>
     </div>
     <div class="progress" id="prog"></div>
   </header>
@@ -242,7 +263,7 @@ body.dragging .drop{display:flex}
         <button class="chip" id="bSave">Save .html</button>
         <button class="chip" id="bReset">Reset settings</button>
       </div>
-      <p class="hint"><kbd>\</kbd> panel · <kbd>[</kbd><kbd>]</kbd> text size · <kbd>b</kbd> bionic · <kbd>f</kbd> focus · <kbd>r</kbd> ruler · <kbd>t</kbd> contents · <kbd>e</kbd> source. Drop a <code>.md</code> file anywhere to read it.</p>
+      <p class="hint"><kbd>\</kbd> panel · <kbd>[</kbd><kbd>]</kbd> text size · <kbd>b</kbd> bionic · <kbd>f</kbd> focus · <kbd>r</kbd> ruler · <kbd>t</kbd> contents · <kbd>e</kbd> source. Drop a <code>.md</code> or <code>.jsonl</code> file anywhere to read it.</p>
     </div>
   </aside>
 
@@ -257,8 +278,8 @@ body.dragging .drop{display:flex}
   <header>Markdown source, edits render live</header>
   <textarea id="srcText" spellcheck="false"></textarea>
 </section>
-<div class="drop">Drop your markdown file to read it</div>
-<input type="file" id="file" accept=".md,.markdown,.mdx,.txt,text/*" hidden>
+<div class="drop">Drop a markdown or JSONL file to read it</div>
+<input type="file" id="file" accept=".md,.markdown,.mdx,.txt,.jsonl,.ndjson,text/*" hidden>
 
 <script>
 const $ = s => document.querySelector(s);
@@ -305,8 +326,9 @@ e   source editor
 ## Bringing your own file
 
 - [x] Drag a \`.md\` file onto the window
-- [x] Or press **Open .md**
+- [x] Or press **Open file**
 - [x] Or open **Source** and type, it renders as you go
+- [x] JSONL chat logs open as a clean conversation, with the tool calls left out
 
 Everything you change is remembered in this browser, so the desk looks the same
 next time you sit down. Nothing leaves the page.
@@ -381,6 +403,7 @@ function applyType(){
   doc.style.setProperty('--ws', S.ws + 'em');
   document.documentElement.style.setProperty('--rh', S.rh + 'px');
   fontBox.querySelectorAll('.chip').forEach(b => b.setAttribute('aria-pressed', b.dataset.id === S.font));
+  tocDirty = true;
   $('#vFs').textContent = S.fs + 'px';
   $('#vLh').textContent = S.lh.toFixed(2);
   $('#vMe').textContent = S.me + 'ch';
@@ -421,8 +444,19 @@ $('#tPanel').onclick = () => { S.panel = !S.panel; applyFlags(); save(); };
 /* ── render ────────────────────────────────────────────────── */
 const embed = document.getElementById('embedded');
 const EMBEDDED = !!embed;
-let source = EMBEDDED ? embed.textContent.replace(/<\\\/script/gi, '</script')
+// The launcher embeds the file as base64 so nothing inside it can end the
+// script block early. Older launchers wrote it raw.
+function readEmbed(el){
+  const t = el.textContent;
+  if (el.dataset.enc !== 'base64') return t.replace(/<\\\/script/gi, '</script');
+  const bin = atob(t.replace(/\s+/g, ''));
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new TextDecoder('utf-8').decode(bytes);
+}
+let source = EMBEDDED ? readEmbed(embed)
                       : (localStorage.getItem('reading-desk-doc') || SAMPLE);
+let docName = EMBEDDED ? (embed.dataset.name || '') : '';
 if (EMBEDDED && embed.dataset.name) $('#docname').textContent = embed.dataset.name;
 const FORMATTER = !!(window.marked && window.DOMPurify);
 if (FORMATTER) marked.setOptions({gfm:true, breaks:false});
@@ -431,6 +465,153 @@ function toHtml(md){
   if (FORMATTER) return DOMPurify.sanitize(marked.parse(md));
   const esc = md.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
   return '<p class="fallback">The markdown formatter didn’t load, so this is the plain text.</p><pre>' + esc + '</pre>';
+}
+
+/* ── JSON Lines ────────────────────────────────────────────── */
+// Chat logs (records with type user/assistant and a message) read as a
+// conversation: only what was said, no tool calls, tool output, hidden
+// reasoning or bookkeeping. Any other JSONL reads as a list of records.
+
+const plural = (n, one, many) => n + ' ' + (n === 1 ? one : many);
+const escHtml = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const mdBlock = t => FORMATTER ? marked.parse(t) : '<p>' + escHtml(t).replace(/\n/g, '<br>') + '</p>';
+
+function looksLikeJsonl(text, name){
+  if (/\.(jsonl|ndjson)$/i.test(name || '')) return true;
+  const lines = [];
+  for (const l of text.split('\n', 40)) { if (l.trim()) lines.push(l.trim()); if (lines.length === 5) break; }
+  if (lines.length < 2) return false;
+  return lines.every(l => { if (l[0] !== '{') return false; try { JSON.parse(l); return true; } catch (e) { return false; } });
+}
+
+function parseJsonl(text){
+  const recs = []; let bad = 0;
+  for (const line of text.split('\n')){
+    const t = line.trim(); if (!t) continue;
+    try { recs.push(JSON.parse(t)); } catch (e) { bad++; }
+  }
+  return {recs, bad};
+}
+
+const isChat = r => r && (r.type === 'user' || r.type === 'assistant') && r.message && typeof r.message === 'object';
+
+// What a person typed, minus the wrappers a chat tool adds around it.
+const DROP_WHOLE = /^\s*<(task-notification|local-command-caveat|local-command-stdout|local-command-stderr|bash-stdout|bash-stderr)>/;
+const DROP_TAGS  = /<(system-reminder|task-notification|local-command-caveat|local-command-stdout|local-command-stderr|bash-stdout|bash-stderr)>[\s\S]*?<\/\1>/g;
+function cleanTyped(text){
+  if (DROP_WHOLE.test(text)) return {text: '', cmd: ''};
+  const name = text.match(/<command-name>([\s\S]*?)<\/command-name>/);
+  if (name){
+    const args = (text.match(/<command-args>([\s\S]*?)<\/command-args>/) || ['', ''])[1].trim();
+    return {text: '', cmd: name[1].trim() + (args ? ' ' + args : '')};
+  }
+  return {text: text.replace(DROP_TAGS, '').trim(), cmd: ''};
+}
+
+function spoken(r){
+  const c = r.message.content, parts = []; let images = 0;
+  if (typeof c === 'string') parts.push(c);
+  else if (Array.isArray(c)) for (const b of c){
+    if (!b) continue;
+    if (b.type === 'text' && b.text) parts.push(b.text);
+    else if (b.type === 'image') images++;
+  }
+  return {text: parts.join('\n\n'), images};
+}
+
+function chatToHtml(recs){
+  let custom = '', auto = '';
+  const turns = [];
+  for (const r of recs){
+    if (!r || typeof r !== 'object') continue;
+    if (r.type === 'custom-title' && r.customTitle) { custom = r.customTitle; continue; }
+    if (r.type === 'ai-title' && r.aiTitle) { auto = r.aiTitle; continue; }
+    if (!isChat(r) || r.isSidechain || r.isMeta || r.isApiErrorMessage) continue;
+    if (r.isCompactSummary){ turns.push({role: 'note', time: r.timestamp}); continue; }
+
+    const role = r.type === 'user' ? 'you' : 'assistant';
+    let {text, images} = spoken(r), cmd = '';
+    if (role === 'you') ({text, cmd} = cleanTyped(text));
+    if (!text && !cmd && !images) continue;
+
+    const last = turns[turns.length - 1];
+    if (last && last.role === role && !cmd && !last.cmd){
+      if (text) last.text += (last.text ? '\n\n' : '') + text;
+      last.images += images;
+    } else turns.push({role, text, cmd, images, time: r.timestamp});
+  }
+
+  const said = turns.filter(t => t.role !== 'note');
+  const firstAsk = said.find(t => t.role === 'you' && t.text);
+  const title = custom || auto || (firstAsk ? firstAsk.text.split('\n')[0].slice(0, 80) : 'Conversation');
+  const when = said.map(t => new Date(t.time)).filter(d => !isNaN(d));
+  const dayFmt  = {weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'};
+  const timeFmt = {hour: '2-digit', minute: '2-digit'};
+
+  let out = '<h1>' + escHtml(title) + '</h1><p class="chat-meta">' + plural(said.length, 'message', 'messages');
+  if (when.length){
+    const a = when[0], b = when[when.length - 1];
+    out += ' · ' + escHtml(a.toLocaleDateString(undefined, {day: 'numeric', month: 'short', year: 'numeric'}));
+    if (a.toDateString() !== b.toDateString())
+      out += ' to ' + escHtml(b.toLocaleDateString(undefined, {day: 'numeric', month: 'short', year: 'numeric'}));
+  }
+  out += '</p>';
+
+  let day = '';
+  for (const t of turns){
+    const d = t.time ? new Date(t.time) : null, ok = d && !isNaN(d);
+    if (ok && d.toDateString() !== day){
+      day = d.toDateString();
+      out += '<p class="chat-day">' + escHtml(d.toLocaleDateString(undefined, dayFmt)) + '</p>';
+    }
+    if (t.role === 'note'){ out += '<p class="chat-note">Earlier messages were summarised here to save space.</p>'; continue; }
+
+    const label = t.text ? t.text.replace(/\s+/g, ' ').trim() : t.cmd;
+    const toc = t.role === 'you' ? ' data-toc="' + escHtml(label.slice(0, 70) + (label.length > 70 ? '…' : '')) + '"' : '';
+    out += '<section class="turn ' + t.role + '"' + toc + '><p class="who">' + (t.role === 'you' ? 'You' : 'Assistant')
+         + (ok ? '<time>' + escHtml(d.toLocaleTimeString(undefined, timeFmt)) + '</time>' : '') + '</p>';
+    if (t.cmd)  out += '<p class="cmd"><code>' + escHtml(t.cmd) + '</code></p>';
+    if (t.text) out += mdBlock(t.text);
+    if (t.images) out += '<p class="chat-note">' + (t.images === 1 ? 'An image was attached.' : t.images + ' images were attached.') + '</p>';
+    out += '</section>';
+  }
+  return out;
+}
+
+function valueHtml(v, depth){
+  if (v === null) return '<span class="chat-note">empty</span>';
+  if (typeof v !== 'object') return escHtml(v);
+  if (depth >= 2 || Array.isArray(v) && v.some(x => x && typeof x === 'object'))
+    return '<code>' + escHtml(JSON.stringify(v).slice(0, 600)) + '</code>';
+  if (Array.isArray(v)) return escHtml(v.join(', '));
+  return fieldsHtml(v, depth + 1);
+}
+const fieldsHtml = (o, depth) => '<dl class="rec-fields">' +
+  Object.keys(o).map(k => '<dt>' + escHtml(k) + '</dt><dd>' + valueHtml(o[k], depth) + '</dd>').join('') + '</dl>';
+
+function recordsToHtml(recs, bad){
+  const objs = recs.filter(r => r && typeof r === 'object' && !Array.isArray(r));
+  const keys = [...new Set(objs.flatMap(o => Object.keys(o)))];
+  const flat = objs.every(o => Object.values(o).every(v => v === null || typeof v !== 'object'));
+  let out = '<h1>' + escHtml(docName || 'Records') + '</h1><p class="chat-meta">' + plural(objs.length, 'record', 'records')
+          + (bad ? ', ' + plural(bad, 'unreadable line', 'unreadable lines') + ' skipped' : '') + '</p>';
+
+  if (flat && objs.length <= 5000 && keys.length && keys.length <= 10){
+    out += '<table><thead><tr>' + keys.map(k => '<th>' + escHtml(k) + '</th>').join('') + '</tr></thead><tbody>';
+    for (const o of objs) out += '<tr>' + keys.map(k => '<td>' + (k in o ? valueHtml(o[k], 0) : '') + '</td>').join('') + '</tr>';
+    return out + '</tbody></table>';
+  }
+  objs.forEach((o, i) => {
+    out += '<section class="turn rec"><p class="who">Record ' + (i + 1) + '</p>' + fieldsHtml(o, 0) + '</section>';
+  });
+  return out;
+}
+
+function docToHtml(text, name){
+  if (!looksLikeJsonl(text, name)) return toHtml(text);
+  const {recs, bad} = parseJsonl(text);
+  const html = recs.some(isChat) ? chatToHtml(recs) : recordsToHtml(recs, bad);
+  return FORMATTER ? DOMPurify.sanitize(html) : html;
 }
 
 function bionify(root, pct){
@@ -453,13 +634,13 @@ function bionify(root, pct){
 }
 
 function render(){
-  const html = toHtml(source);
+  const html = docToHtml(source, docName);
   doc.innerHTML = html;
   doc.querySelectorAll('table').forEach(t => {
     const w = document.createElement('div'); w.className = 'tablewrap';
     t.parentNode.insertBefore(w, t); w.append(t);
   });
-  doc.querySelectorAll('h1,h2,h3,h4').forEach((h,i) => h.id = h.id || 'h'+i);
+  doc.querySelectorAll('h1,h2,h3,h4,[data-toc]').forEach((h,i) => h.id = h.id || 'h'+i);
   if (S.bion) bionify(doc, S.bs);
   buildToc();
   const text = doc.textContent.trim();
@@ -467,16 +648,28 @@ function render(){
   $('#sWords').textContent = words.toLocaleString();
   $('#sTime').textContent = Math.max(1, Math.round(words / 220));
   const h1 = doc.querySelector('h1');
-  if (h1 && !EMBEDDED) $('#docname').textContent = h1.textContent;
+  // a chat log's title says more than its file name, which is usually an id
+  if (h1 && (!EMBEDDED || doc.querySelector('.turn'))) $('#docname').textContent = h1.textContent;
   onScroll();
 }
 
+// A conversation lists what you asked; a document lists its headings.
+// Positions are measured lazily: fonts, text size and window width all move them.
+let tocEls = [], tocTops = [], tocDirty = true;
+function tocTargets(){
+  const asks = doc.querySelectorAll('[data-toc]');
+  return asks.length ? asks : doc.querySelectorAll('h1,h2,h3,h4');
+}
+if (document.fonts) document.fonts.ready.then(() => { tocDirty = true; onScroll(); });
+
 function buildToc(){
   const list = $('#tocList'); list.innerHTML = '';
-  doc.querySelectorAll('h1,h2,h3,h4').forEach(h => {
+  tocEls = [...tocTargets()];
+  tocDirty = true;
+  tocEls.forEach(h => {
     const a = document.createElement('a');
-    a.href = '#' + h.id; a.textContent = h.textContent;
-    a.className = 'lvl' + h.tagName[1];
+    a.href = '#' + h.id; a.textContent = h.dataset.toc || h.textContent;
+    a.className = h.dataset.toc ? 'lvl2' : 'lvl' + h.tagName[1];
     a.onclick = e => { e.preventDefault(); h.scrollIntoView({block:'start'}); };
     list.append(a);
   });
@@ -488,14 +681,19 @@ function onScroll(){
   const pct = max > 0 ? Math.min(100, Math.round(stage.scrollTop / max * 100)) : 0;
   $('#prog').style.width = pct + '%';
   $('#sPct').textContent = pct;
-  let cur = null;
-  doc.querySelectorAll('h1,h2,h3,h4').forEach(h => {
-    if (h.getBoundingClientRect().top < 140) cur = h.id;
-  });
-  $('#tocList').querySelectorAll('a').forEach(a => a.classList.toggle('here', a.getAttribute('href') === '#'+cur));
+  // last target above the reading line, by binary search: long chats have thousands
+  if (tocDirty){ tocTops = tocEls.map(h => h.offsetTop); tocDirty = false; }
+  const line = stage.scrollTop + 140;
+  let lo = 0, hi = tocTops.length - 1, at = -1;
+  while (lo <= hi){ const mid = (lo + hi) >> 1; if (tocTops[mid] <= line){ at = mid; lo = mid + 1; } else hi = mid - 1; }
+  const cur = at >= 0 ? tocEls[at].id : null;
+  if (cur !== onScroll.last){
+    onScroll.last = cur;
+    $('#tocList').querySelectorAll('a').forEach(a => a.classList.toggle('here', a.getAttribute('href') === '#'+cur));
+  }
 }
 stage.addEventListener('scroll', onScroll, {passive:true});
-addEventListener('resize', onScroll);
+addEventListener('resize', () => { tocDirty = true; onScroll(); });
 
 stage.addEventListener('pointermove', e => {
   if (S.ruler) $('#ruler').style.top = Math.max(0, e.clientY - S.rh/2) + 'px';
@@ -509,7 +707,9 @@ stage.addEventListener('pointermove', e => {
 /* ── files, source editor ──────────────────────────────────── */
 function load(text, name){
   source = text;
-  $('#srcText').value = text;
+  docName = name || '';
+  srcStale = true;
+  if (document.body.classList.contains('src-on')) fillSource();
   if (name) $('#docname').textContent = name;
   if (!EMBEDDED) try{ localStorage.setItem('reading-desk-doc', text); }catch(e){}
   render(); stage.scrollTop = 0;
@@ -535,8 +735,12 @@ $('#srcText').addEventListener('input', e => {
     if (!EMBEDDED) try{ localStorage.setItem('reading-desk-doc', source); }catch(err){}
     render(); }, 220);
 });
+// Filling the textarea with a large log is slow, so only do it when it is shown.
+let srcStale = true;
+function fillSource(){ if (srcStale){ $('#srcText').value = source; srcStale = false; } }
 $('#tSrc').onclick = () => {
   const on = document.body.classList.toggle('src-on');
+  if (on) fillSource();
   $('#tSrc').setAttribute('aria-pressed', on);
   if (on) $('#srcText').focus();
 };
@@ -585,6 +789,5 @@ addEventListener('keydown', e => {
 });
 
 /* ── boot ──────────────────────────────────────────────────── */
-$('#srcText').value = source;
 applyTheme(); applyType(); applyFlags(); render();
 </script>
