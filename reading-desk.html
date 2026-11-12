@@ -63,6 +63,7 @@ button,input,select{font:inherit;color:inherit}
   background:var(--c-panel);border-radius:7px;font-size:12.5px;cursor:pointer;white-space:nowrap}
 .btn:hover{border-color:var(--c-accent);color:var(--c-accent)}
 .btn[aria-pressed="true"]{background:var(--c-accent-soft);border-color:var(--c-accent);color:var(--c-accent)}
+.btn:disabled{opacity:.4;pointer-events:none}
 
 /* ── control panel ─────────────────────────────────────────── */
 .panel{background:var(--c-panel);border-right:1px solid var(--c-line);overflow-y:auto;padding:18px 16px 40px;
@@ -150,7 +151,9 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--c-sunk);border:1px
 .reader .rec-fields dt{font-family:var(--ui);font-size:.78em;color:var(--r-mute);padding-top:.2em}
 .reader .rec-fields dd{margin:0;overflow-wrap:anywhere}
 .reader .rec-fields .rec-fields{font-size:.92em}
-.reader img{max-width:100%;border-radius:8px}
+.reader img{max-width:100%;height:auto;border-radius:8px}
+.reader td{vertical-align:top}
+.reader pre.log{white-space:pre-wrap;overflow-wrap:anywhere;font-size:.8em;line-height:1.55}
 .reader input[type=checkbox]{accent-color:var(--r-accent);margin-right:.4em}
 .reader ul:has(input[type=checkbox]){list-style:none;padding-left:.2em}
 
@@ -263,7 +266,7 @@ body.dragging .drop{display:flex}
         <button class="chip" id="bSave">Save .html</button>
         <button class="chip" id="bReset">Reset settings</button>
       </div>
-      <p class="hint"><kbd>\</kbd> panel · <kbd>[</kbd><kbd>]</kbd> text size · <kbd>b</kbd> bionic · <kbd>f</kbd> focus · <kbd>r</kbd> ruler · <kbd>t</kbd> contents · <kbd>e</kbd> source. Drop a <code>.md</code> or <code>.jsonl</code> file anywhere to read it.</p>
+      <p class="hint"><kbd>\</kbd> panel · <kbd>[</kbd><kbd>]</kbd> text size · <kbd>b</kbd> bionic · <kbd>f</kbd> focus · <kbd>r</kbd> ruler · <kbd>t</kbd> contents · <kbd>e</kbd> source. Drop a document anywhere to read it: Markdown, text, CSV, JSON, JSONL, HTML, RTF, Word, EPUB or PDF.</p>
     </div>
   </aside>
 
@@ -278,8 +281,8 @@ body.dragging .drop{display:flex}
   <header>Markdown source, edits render live</header>
   <textarea id="srcText" spellcheck="false"></textarea>
 </section>
-<div class="drop">Drop a markdown or JSONL file to read it</div>
-<input type="file" id="file" accept=".md,.markdown,.mdx,.txt,.jsonl,.ndjson,text/*" hidden>
+<div class="drop">Drop a document to read it</div>
+<input type="file" id="file" accept=".md" hidden>
 
 <script>
 const $ = s => document.querySelector(s);
@@ -329,6 +332,7 @@ e   source editor
 - [x] Or press **Open file**
 - [x] Or open **Source** and type, it renders as you go
 - [x] JSONL chat logs open as a clean conversation, with the tool calls left out
+- [x] Text, CSV, JSON, HTML, RTF, Word, EPUB and PDF files open too
 
 Everything you change is remembered in this browser, so the desk looks the same
 next time you sit down. Nothing leaves the page.
@@ -442,21 +446,67 @@ function applyFlags(){
 $('#tPanel').onclick = () => { S.panel = !S.panel; applyFlags(); save(); };
 
 /* ── render ────────────────────────────────────────────────── */
+// File types by extension. Text formats arrive as text; the three container
+// formats stay as bytes and are unpacked in the page.
+const FORMATS = {
+  md:   ['md','markdown','mdown','mkd','mkdn','mdwn','mdx','rmd'],
+  text: ['txt','text'], log: ['log'],
+  rst:  ['rst'], adoc: ['adoc','asciidoc'], org: ['org'],
+  csv:  ['csv'], tsv: ['tsv'],
+  json: ['json'], jsonl: ['jsonl','ndjson'],
+  html: ['html','htm','xhtml'], rtf: ['rtf'],
+  docx: ['docx'], epub: ['epub'], pdf: ['pdf']
+};
+const BINARY = new Set(['docx','epub','pdf']);
+function kindOf(name){
+  const ext = ((/\.([a-z0-9]+)$/i.exec(name || '') || [])[1] || '').toLowerCase();
+  for (const k in FORMATS) if (FORMATS[k].includes(ext)) return k;
+  return '';                                   // markdown, unless it sniffs as JSONL
+}
+$('#file').accept = Object.values(FORMATS).flat().map(e => '.' + e).join(',');
+
+// Byte order marks first, then strict UTF-8; older files saved in the
+// Windows code page fall back to that rather than showing replacement marks.
+function decodeText(bytes){
+  if (bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) return new TextDecoder('utf-8').decode(bytes.subarray(3));
+  if (bytes[0] === 0xFF && bytes[1] === 0xFE) return new TextDecoder('utf-16le').decode(bytes.subarray(2));
+  if (bytes[0] === 0xFE && bytes[1] === 0xFF) return new TextDecoder('utf-16be').decode(bytes.subarray(2));
+  try { return new TextDecoder('utf-8', {fatal: true}).decode(bytes); }
+  catch (e) { return new TextDecoder('windows-1252').decode(bytes); }
+}
+
 const embed = document.getElementById('embedded');
 const EMBEDDED = !!embed;
+let source = '', docName = '', docKind = '', docBytes = null, docHtml = null;
+let docBase = EMBEDDED ? (embed.dataset.base || '') : '';   // the file's own folder, for relative images and links
+
+function takeDoc(bytes, name){
+  docName = name || '';
+  docKind = kindOf(docName);
+  docHtml = null;
+  if (BINARY.has(docKind)) { docBytes = bytes; source = ''; }
+  else { docBytes = null; source = decodeText(bytes); }
+  $('#tSrc').disabled = !!docBytes;
+  if (docBytes) document.body.classList.remove('src-on');
+}
+
 // The launcher embeds the file as base64 so nothing inside it can end the
-// script block early. Older launchers wrote it raw.
-function readEmbed(el){
-  const t = el.textContent;
-  if (el.dataset.enc !== 'base64') return t.replace(/<\\\/script/gi, '</script');
-  const bin = atob(t.replace(/\s+/g, ''));
+// script block early. Older launchers wrote markdown raw.
+if (EMBEDDED && embed.dataset.enc === 'base64'){
+  const bin = atob(embed.textContent.replace(/\s+/g, ''));
   const bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return new TextDecoder('utf-8').decode(bytes);
+  takeDoc(bytes, embed.dataset.name);
+} else if (EMBEDDED){
+  source = embed.textContent.replace(/<\\\/script/gi, '</script');
+  docName = embed.dataset.name || '';
+  docKind = kindOf(docName);
+} else {
+  const kept = localStorage.getItem('reading-desk-doc');
+  source = kept || SAMPLE;
+  docName = kept ? (localStorage.getItem('reading-desk-name') || '') : '';
+  docKind = kindOf(docName);
 }
-let source = EMBEDDED ? readEmbed(embed)
-                      : (localStorage.getItem('reading-desk-doc') || SAMPLE);
-let docName = EMBEDDED ? (embed.dataset.name || '') : '';
 if (EMBEDDED && embed.dataset.name) $('#docname').textContent = embed.dataset.name;
 const FORMATTER = !!(window.marked && window.DOMPurify);
 if (FORMATTER) marked.setOptions({gfm:true, breaks:false});
@@ -607,6 +657,560 @@ function recordsToHtml(recs, bad){
   return out;
 }
 
+/* ── Other formats ─────────────────────────────────────────── */
+
+const clean = html => window.DOMPurify ? DOMPurify.sanitize(html) : html;
+const fileTitle = () => docName.replace(/\.[^.]+$/, '') || 'Document';
+const NEEDS_NET = 'Opening this kind of file needs a small helper from the internet, and it could not be reached. Check the connection and open the file again.';
+
+const scriptCache = {};
+function loadScript(url){
+  return scriptCache[url] || (scriptCache[url] = new Promise((ok, fail) => {
+    const el = document.createElement('script');
+    el.src = url;
+    el.onload = ok;
+    el.onerror = () => { delete scriptCache[url]; el.remove(); fail(new Error(NEEDS_NET)); };
+    document.head.append(el);
+  }));
+}
+
+// Plain text: blank lines split paragraphs. Hard-wrapped prose is joined back
+// up; short lines (lists, verse, addresses) keep their breaks; indented blocks
+// stay as they are.
+function textToHtml(t){
+  return t.replace(/\r\n?/g, '\n').split(/\n[ \t]*\n+/).map(par => {
+    if (!par.trim()) return '';
+    const lines = par.split('\n');
+    if (lines.length > 1 && lines.every(l => /^( {4}|\t)/.test(l) || !l.trim())) return '<pre>' + escHtml(par) + '</pre>';
+    const wrapped = lines.length > 1 && lines.slice(0, -1).every(l => l.trim().length >= 50);
+    return '<p>' + (wrapped ? escHtml(lines.map(l => l.trim()).join(' ')) : lines.map(escHtml).join('<br>')) + '</p>';
+  }).join('');
+}
+
+// reStructuredText, AsciiDoc and Org share enough with Markdown that turning
+// their headings, emphasis, links and code blocks over is all that is needed.
+const ADORN = /^([=\-~^"'`#*+:.])\1{2,}\s*$/;
+function rstToMd(t){
+  const lines = t.replace(/\r\n?/g, '\n').split('\n'), out = [], levels = [];
+  const level = key => { let i = levels.indexOf(key); if (i < 0) { levels.push(key); i = levels.length - 1; } return '#'.repeat(Math.min(i + 1, 6)); };
+  for (let i = 0; i < lines.length; i++){
+    const l = lines[i];
+    if (ADORN.test(l) && lines[i + 1] && lines[i + 1].trim() && ADORN.test(lines[i + 2] || '')){
+      out.push(level('o' + l.trim()[0]) + ' ' + lines[i + 1].trim()); i += 2; continue;
+    }
+    if (l.trim() && !ADORN.test(l) && ADORN.test(lines[i + 1] || '') && lines[i + 1].trim().length >= l.trim().length){
+      out.push(level(lines[i + 1].trim()[0]) + ' ' + l.trim()); i++; continue;
+    }
+    if (/^\.\. /.test(l)) { out.push(''); continue; }               // directives and comments
+    out.push(l.replace(/``([^`]+)``/g, '`$1`')
+              .replace(/`([^`<]+?)\s*<([^>]+)>`_{1,2}/g, '[$1]($2)')
+              .replace(/::\s*$/, ':'));
+  }
+  return out.join('\n');
+}
+
+function adocToMd(t){
+  let fence = false;
+  return t.replace(/\r\n?/g, '\n').split('\n').map(l => {
+    if (/^(-{4,}|\.{4,})\s*$/.test(l)) { fence = !fence; return '```'; }
+    if (fence) return l;
+    let m;
+    if ((m = /^(=+)\s+(.*)$/.exec(l))) return '#'.repeat(Math.min(m[1].length, 6)) + ' ' + m[2];
+    if (/^:[\w-]+:/.test(l) || /^\[[^\]]*\]\s*$/.test(l) || /^\/\//.test(l)) return '';
+    if ((m = /^(\*+)\s+(.*)$/.exec(l))) return '  '.repeat(m[1].length - 1) + '- ' + m[2];
+    if ((m = /^(\.+)\s+(.*)$/.exec(l))) return '  '.repeat(m[1].length - 1) + '1. ' + m[2];
+    return l.replace(/(^|[^\w*])\*([^*\n]+)\*(?![\w*])/g, '$1**$2**')
+            .replace(/(^|[^\w_])_([^_\n]+)_(?![\w_])/g, '$1*$2*')
+            .replace(/\b(https?:\/\/[^\s\[]+)\[([^\]]*)\]/g, (x, u, label) => '[' + (label || u) + '](' + u + ')');
+  }).join('\n');
+}
+
+function orgToMd(t){
+  let fence = false;
+  return t.replace(/\r\n?/g, '\n').split('\n').map(l => {
+    if (/^\s*#\+begin_(src|example|quote)/i.test(l)) { fence = !/quote/i.test(l); return fence ? '```' : ''; }
+    if (/^\s*#\+end_(src|example|quote)/i.test(l)) { const was = fence; fence = false; return was ? '```' : ''; }
+    if (fence) return l;
+    let m;
+    if ((m = /^#\+title:\s*(.*)$/i.exec(l))) return '# ' + m[1];
+    if (/^\s*#\+/.test(l) || /^\s*:(PROPERTIES|END):/i.test(l)) return '';
+    if ((m = /^(\*+)\s+(?:(?:TODO|DONE)\s+)?(.*)$/.exec(l))) return '#'.repeat(Math.min(m[1].length + 1, 6)) + ' ' + m[2];
+    return l.replace(/\[\[([^\]]+)\]\[([^\]]+)\]\]/g, '[$2]($1)')
+            .replace(/\[\[([^\]]+)\]\]/g, '<$1>')
+            .replace(/(^|\s)\*(\S(?:[^*]*\S)?)\*(?=[\s.,;:!?)]|$)/g, '$1**$2**')
+            .replace(/(^|\s)\/(\S(?:[^\/]*\S)?)\/(?=[\s.,;:!?)]|$)/g, '$1*$2*')
+            .replace(/(^|\s)[=~](\S(?:[^=~]*\S)?)[=~](?=[\s.,;:!?)]|$)/g, '$1`$2`');
+  }).join('\n');
+}
+
+// CSV and TSV, with quoted fields that may hold separators and line breaks.
+function parseDelimited(t, sep){
+  const rows = []; let row = [], cell = '', q = false;
+  for (let i = 0; i < t.length; i++){
+    const c = t[i];
+    if (q){
+      if (c === '"'){ if (t[i + 1] === '"') { cell += '"'; i++; } else q = false; }
+      else cell += c;
+      continue;
+    }
+    if (c === '"' && cell === '') { q = true; continue; }
+    if (c === sep) { row.push(cell); cell = ''; continue; }
+    if (c === '\n' || c === '\r'){
+      if (c === '\r' && t[i + 1] === '\n') i++;
+      row.push(cell); rows.push(row); row = []; cell = '';
+      continue;
+    }
+    cell += c;
+  }
+  if (cell !== '' || row.length) { row.push(cell); rows.push(row); }
+  return rows.filter(r => r.length > 1 || r[0] !== '');
+}
+// Spreadsheets in many locales export with semicolons
+function sniffSep(t){
+  const first = t.split('\n', 1)[0];
+  const n = ch => first.split(ch).length;
+  return n(';') > n(',') && n(';') >= n('\t') ? ';' : n('\t') > n(',') ? '\t' : ',';
+}
+function tableToHtml(rows){
+  if (!rows.length) return '<h1>' + escHtml(fileTitle()) + '</h1><p class="chat-note">This file is empty.</p>';
+  const head = rows[0], body = rows.slice(1), cap = 20000;
+  let out = '<h1>' + escHtml(fileTitle()) + '</h1><p class="chat-meta">' + plural(body.length, 'row', 'rows')
+          + ' · ' + plural(head.length, 'column', 'columns') + '</p>';
+  out += '<table><thead><tr>' + head.map(h => '<th>' + escHtml(h) + '</th>').join('') + '</tr></thead><tbody>';
+  for (const r of body.slice(0, cap)) out += '<tr>' + head.map((_, i) => '<td>' + escHtml(r[i] ?? '') + '</td>').join('') + '</tr>';
+  out += '</tbody></table>';
+  if (body.length > cap) out += '<p class="chat-note">Showing the first ' + cap.toLocaleString() + ' rows.</p>';
+  return out;
+}
+
+function jsonToHtml(t){
+  let v;
+  try { v = JSON.parse(t.replace(/^\uFEFF/, '')); }
+  catch (e) { return '<h1>' + escHtml(fileTitle()) + '</h1><p class="fallback">This JSON could not be read: ' + escHtml(e.message) + '</p><pre>' + escHtml(t.slice(0, 200000)) + '</pre>'; }
+  if (Array.isArray(v) && v.length && v.every(x => x && typeof x === 'object' && !Array.isArray(x))) return recordsToHtml(v, 0);
+  if (v && typeof v === 'object' && !Array.isArray(v)) return '<h1>' + escHtml(fileTitle()) + '</h1>' + fieldsHtml(v, 0);
+  return '<h1>' + escHtml(fileTitle()) + '</h1><pre>' + escHtml(JSON.stringify(v, null, 2)) + '</pre>';
+}
+
+// Web pages: keep the article, drop the furniture (menus, banners, sidebars,
+// forms, scripts) and the page's own colours and fonts.
+function htmlReader(t){
+  const d = new DOMParser().parseFromString(t, 'text/html');
+  const main = d.querySelector('article') || d.querySelector('main,[role=main]') || d.body;
+  if (!main) return '';
+  const junk = 'script,style,link,noscript,template,iframe,object,embed,form,button,input,select,nav,aside,'
+             + '[role=navigation],[role=complementary],[role=search],[aria-hidden=true]'
+             + (main === d.body ? ',body>header,body>footer,[role=banner],[role=contentinfo]' : '');
+  main.querySelectorAll(junk).forEach(n => n.remove());
+  main.querySelectorAll('[style],[class],[color],[bgcolor],[face],[align],[width],[height]').forEach(n =>
+    ['style','class','color','bgcolor','face','align','width','height'].forEach(a => n.removeAttribute(a)));
+  const title = (d.querySelector('title') || {}).textContent || '';
+  let html = main.innerHTML;
+  if (title.trim() && !main.querySelector('h1')) html = '<h1>' + escHtml(title.trim()) + '</h1>' + html;
+  return html;
+}
+
+// RTF: text, paragraphs, bold, italic and underline; everything else in the
+// file (fonts, colours, embedded pictures, field codes) is skipped.
+const RTF_SKIP = /^(fonttbl|colortbl|stylesheet|info|pict|object|themedata|colorschememapping|datastore|xmlnstbl|listtable|listoverridetable|rsidtbl|generator|header[lrf]?|footer[lrf]?|latentstyles|fldinst|nonshppict|bkmkstart|bkmkend|filetbl|revtbl|pgdsctbl|mmathPr|wgrffmtfilter|panose|falt)$/;
+const RTF_CHAR = {emdash: '\u2014', endash: '\u2013', bullet: '\u2022', lquote: '\u2018', rquote: '\u2019',
+                  ldblquote: '\u201C', rdblquote: '\u201D', tab: '\t'};
+const RTF_CP = {932: 'shift_jis', 936: 'gbk', 949: 'euc-kr', 950: 'big5'};
+function rtfToHtml(rtf){
+  let st = {b: 0, i: 0, u: 0, skip: 0, uc: 1}, cp = 'windows-1252', ucSkip = 0, i = 0;
+  const stack = [], paras = [], hex = [];
+  let runs = [];
+  const add = t => {
+    if (st.skip || !t) return;
+    const last = runs[runs.length - 1];
+    if (last && last.b === st.b && last.i === st.i && last.u === st.u) last.t += t;
+    else runs.push({t, b: st.b, i: st.i, u: st.u});
+  };
+  const flushHex = () => {
+    if (!hex.length) return;
+    let text;
+    try { text = new TextDecoder(cp).decode(new Uint8Array(hex)); } catch (e) { text = new TextDecoder('windows-1252').decode(new Uint8Array(hex)); }
+    hex.length = 0; add(text);
+  };
+  const endPara = () => { flushHex(); paras.push(runs); runs = []; };
+
+  while (i < rtf.length){
+    const c = rtf[i];
+    if (c === '{') { flushHex(); stack.push(Object.assign({}, st)); i++; continue; }
+    if (c === '}') { flushHex(); st = stack.pop() || st; i++; continue; }
+    if (c === '\r' || c === '\n') { i++; continue; }
+    if (c === '\\'){
+      const n = rtf[i + 1];
+      if (n === "'"){
+        const h = parseInt(rtf.substr(i + 2, 2), 16); i += 4;
+        if (ucSkip > 0) { ucSkip--; continue; }
+        if (!st.skip && !isNaN(h)) hex.push(h);
+        continue;
+      }
+      flushHex();
+      if (n === '{' || n === '}' || n === '\\') { if (ucSkip > 0) ucSkip--; else add(n); i += 2; continue; }
+      if (n === '~') { add('\u00A0'); i += 2; continue; }
+      if (n === '_') { add('\u2011'); i += 2; continue; }
+      if (n === '-') { i += 2; continue; }
+      if (n === '*') { st.skip = 1; i += 2; continue; }
+      if (n === '\n' || n === '\r') { endPara(); i += 2; continue; }
+      const m = /^([a-zA-Z]+)(-?\d+)? ?/.exec(rtf.slice(i + 1, i + 48));
+      if (!m) { i += 2; continue; }
+      i += 1 + m[0].length;
+      const w = m[1], arg = m[2] === undefined ? null : +m[2];
+      if (RTF_SKIP.test(w)) { st.skip = 1; continue; }
+      if (w === 'ansicpg') { cp = RTF_CP[arg] || 'windows-' + arg; continue; }
+      if (st.skip) continue;
+      switch (w){
+        case 'par': case 'sect': case 'page': case 'row': endPara(); break;
+        case 'line': add('\n'); break;
+        case 'cell': add('\t'); break;
+        case 'b': st.b = arg === 0 ? 0 : 1; break;
+        case 'i': st.i = arg === 0 ? 0 : 1; break;
+        case 'ul': st.u = arg === 0 ? 0 : 1; break;
+        case 'ulnone': st.u = 0; break;
+        case 'plain': st.b = st.i = st.u = 0; break;
+        case 'uc': st.uc = arg || 0; break;
+        case 'u': add(String.fromCharCode(arg < 0 ? arg + 65536 : arg)); ucSkip = st.uc; break;
+        default: if (RTF_CHAR[w]) add(RTF_CHAR[w]);
+      }
+      continue;
+    }
+    flushHex();
+    let j = i;
+    while (j < rtf.length && !'\\{}\r\n'.includes(rtf[j])) j++;
+    let text = rtf.slice(i, j);
+    if (ucSkip > 0) { const cut = Math.min(ucSkip, text.length); text = text.slice(cut); ucSkip -= cut; }
+    add(text); i = j;
+  }
+  endPara();
+
+  return paras.map(p => {
+    const html = p.map(r => {
+      let t = escHtml(r.t).replace(/\n/g, '<br>').replace(/\t/g, '&emsp;');
+      if (r.b) t = '<strong>' + t + '</strong>';
+      if (r.i) t = '<em>' + t + '</em>';
+      if (r.u) t = '<u>' + t + '</u>';
+      return t;
+    }).join('');
+    return html.replace(/<[^>]+>|&emsp;|\s/g, '') ? '<p>' + html + '</p>' : '';
+  }).join('');
+}
+
+/* ── Word, EPUB and PDF: unpacked in the page ─────────────────── */
+
+const JSZIP = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+const PDFJS = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
+const CMAPS = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/';
+const IMAGE_TYPES = {png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+                     bmp: 'image/bmp', svg: 'image/svg+xml', webp: 'image/webp'};
+
+const parseXml = t => new DOMParser().parseFromString(t, 'application/xml');
+const kids = (n, name) => n ? [...n.childNodes].filter(c => c.nodeType === 1 && (!name || c.localName === name)) : [];
+const kid = (n, name) => kids(n, name)[0];
+const wval = (n, name) => n ? (n.getAttribute('w:' + name) ?? n.getAttribute(name)) : null;
+function joinPath(dir, href){
+  const out = [];
+  for (const part of (dir + decodeURIComponent((href || '').split('#')[0])).split('/')){
+    if (part === '..') out.pop(); else if (part && part !== '.') out.push(part);
+  }
+  return out.join('/');
+}
+async function zipImage(zip, path){
+  const type = IMAGE_TYPES[path.split('.').pop().toLowerCase()];
+  const f = type && zip.file(path);
+  return f ? 'data:' + type + ';base64,' + await f.async('base64') : '';
+}
+async function openZip(bytes){
+  await loadScript(JSZIP);
+  if (!window.DOMPurify) throw new Error(NEEDS_NET);
+  return JSZip.loadAsync(bytes);
+}
+
+async function docxToHtml(bytes){
+  const zip = await openZip(bytes);
+  const part = zip.file('word/document.xml');
+  if (!part) throw new Error('This does not look like a Word document.');
+  const xml = parseXml(await part.async('string'));
+  const readXml = async path => { const f = zip.file(path); return f ? parseXml(await f.async('string')) : null; };
+
+  const rels = {};
+  const relXml = await readXml('word/_rels/document.xml.rels');
+  if (relXml) for (const r of relXml.getElementsByTagName('Relationship'))
+    rels[r.getAttribute('Id')] = {target: r.getAttribute('Target'), external: r.getAttribute('TargetMode') === 'External'};
+
+  // style ids are translated in some languages, so go by the style's name
+  const styles = {};
+  const styleXml = await readXml('word/styles.xml');
+  if (styleXml) for (const st of styleXml.getElementsByTagNameNS('*', 'style')){
+    const n = kid(st, 'name');
+    if (n) styles[wval(st, 'styleId')] = (wval(n, 'val') || '').toLowerCase();
+  }
+
+  const listTag = {};
+  const numXml = await readXml('word/numbering.xml');
+  if (numXml){
+    const abstract = {};
+    for (const a of numXml.getElementsByTagNameNS('*', 'abstractNum')){
+      const fmt = kid(kid(a, 'lvl'), 'numFmt');
+      abstract[wval(a, 'abstractNumId')] = fmt && wval(fmt, 'val') !== 'bullet' ? 'ol' : 'ul';
+    }
+    for (const n of numXml.getElementsByTagNameNS('*', 'num')){
+      const a = kid(n, 'abstractNumId');
+      if (a) listTag[wval(n, 'numId')] = abstract[wval(a, 'val')] || 'ul';
+    }
+  }
+
+  const images = [];
+  const on = el => !!el && !/^(0|false|none)$/i.test(wval(el, 'val') || '');
+  function run(r){
+    let t = '';
+    for (const c of kids(r)){
+      const n = c.localName;
+      if (n === 't') t += escHtml(c.textContent);
+      else if (n === 'tab') t += ' ';
+      else if (n === 'br' || n === 'cr') t += '<br>';
+      else if (n === 'drawing' || n === 'pict'){
+        const blip = c.getElementsByTagNameNS('*', 'blip')[0] || c.getElementsByTagNameNS('*', 'imagedata')[0];
+        const id = blip && (blip.getAttribute('r:embed') || blip.getAttribute('r:id'));
+        if (id && rels[id] && !rels[id].external) { images.push(rels[id].target); t += '<img data-n="' + (images.length - 1) + '">'; }
+      }
+    }
+    const pr = kid(r, 'rPr');
+    if (!t || !pr) return t;
+    if (on(kid(pr, 'b'))) t = '<strong>' + t + '</strong>';
+    if (on(kid(pr, 'i'))) t = '<em>' + t + '</em>';
+    if (on(kid(pr, 'u'))) t = '<u>' + t + '</u>';
+    if (on(kid(pr, 'strike'))) t = '<s>' + t + '</s>';
+    const va = wval(kid(pr, 'vertAlign'), 'val');
+    if (va === 'superscript') t = '<sup>' + t + '</sup>';
+    else if (va === 'subscript') t = '<sub>' + t + '</sub>';
+    return t;
+  }
+  function inline(n){
+    let html = '';
+    for (const c of kids(n)){
+      const k = c.localName;
+      if (k === 'r') html += run(c);
+      else if (k === 'hyperlink'){
+        const rel = rels[c.getAttribute('r:id')], inner = inline(c);
+        html += rel && rel.external ? '<a href="' + escHtml(rel.target) + '">' + inner + '</a>' : inner;
+      }
+      else if (k === 'ins' || k === 'smartTag' || k === 'fldSimple') html += inline(c);
+      else if (k === 'sdt') html += inline(kid(c, 'sdtContent'));
+      // w:del is tracked deleted text, which stays deleted
+    }
+    return html;
+  }
+
+  let out = '', list = null;
+  const closeList = () => { if (list) { out += '</' + list + '>'; list = null; } };
+  function block(n){
+    const k = n.localName;
+    if (k === 'p'){
+      const pr = kid(n, 'pPr');
+      const sid = wval(kid(pr, 'pStyle'), 'val');
+      const style = styles[sid] || (sid || '').toLowerCase();
+      const numId = wval(kid(kid(pr, 'numPr'), 'numId'), 'val');
+      const html = inline(n);
+      if (numId && numId !== '0'){
+        const tag = listTag[numId] || 'ul';
+        if (list !== tag) { closeList(); out += '<' + tag + '>'; list = tag; }
+        out += '<li>' + html + '</li>';
+        return;
+      }
+      closeList();
+      if (!html.replace(/<br>/g, '').trim()) return;
+      let m;
+      if (style === 'title') out += '<h1>' + html + '</h1>';
+      else if (style === 'subtitle') out += '<p class="chat-meta">' + html + '</p>';
+      else if ((m = /heading\s*(\d)/.exec(style))) { const h = 'h' + Math.min(+m[1], 6); out += '<' + h + '>' + html + '</' + h + '>'; }
+      else if (/quote/.test(style)) out += '<blockquote><p>' + html + '</p></blockquote>';
+      else out += '<p>' + html + '</p>';
+    } else if (k === 'tbl'){
+      closeList();
+      out += '<table><tbody>' + kids(n, 'tr').map(tr => '<tr>' + kids(tr, 'tc').map(tc =>
+        '<td>' + kids(tc, 'p').map(inline).filter(Boolean).join('<br>') + '</td>').join('') + '</tr>').join('') + '</tbody></table>';
+    } else if (k === 'sdt'){
+      kids(kid(n, 'sdtContent')).forEach(block);
+    }
+  }
+  kids(xml.getElementsByTagNameNS('*', 'body')[0]).forEach(block);
+  closeList();
+
+  const srcs = await Promise.all(images.map(t => zipImage(zip, t.startsWith('/') ? t.slice(1) : joinPath('word/', t))));
+  out = out.replace(/<img data-n="(\d+)">/g, (x, n) => srcs[n] ? '<img src="' + srcs[n] + '" alt="">' : '');
+  return clean(out);
+}
+
+async function epubToHtml(bytes){
+  const zip = await openZip(bytes);
+  const container = zip.file('META-INF/container.xml');
+  if (!container) throw new Error('This does not look like an EPUB book.');
+  const opfPath = parseXml(await container.async('string')).getElementsByTagNameNS('*', 'rootfile')[0].getAttribute('full-path');
+  const opf = parseXml(await zip.file(opfPath).async('string'));
+  const dir = opfPath.slice(0, opfPath.lastIndexOf('/') + 1);
+  const meta = name => ((opf.getElementsByTagNameNS('*', name)[0] || {}).textContent || '').trim();
+
+  const items = {};
+  for (const it of opf.getElementsByTagNameNS('*', 'item'))
+    items[it.getAttribute('id')] = {href: it.getAttribute('href'), type: it.getAttribute('media-type') || ''};
+
+  let out = '<h1>' + escHtml(meta('title') || fileTitle()) + '</h1>';
+  if (meta('creator')) out += '<p class="chat-meta">' + escHtml(meta('creator')) + '</p>';
+  const SVG = 'http://www.w3.org/2000/svg';
+  let chapters = 0;
+  for (const ref of opf.getElementsByTagNameNS('*', 'itemref')){
+    const it = items[ref.getAttribute('idref')];
+    if (!it || !/html/.test(it.type)) continue;
+    const path = joinPath(dir, it.href), f = zip.file(path);
+    if (!f) continue;
+    const text = await f.async('string');
+    let page = new DOMParser().parseFromString(text, 'application/xhtml+xml');
+    if (page.getElementsByTagName('parsererror').length) page = new DOMParser().parseFromString(text, 'text/html');
+    const body = page.getElementsByTagName('body')[0];
+    if (!body) continue;
+    const here = path.slice(0, path.lastIndexOf('/') + 1);
+
+    // covers are often an <svg><image>; show them as a plain picture
+    for (const svg of [...body.getElementsByTagNameNS(SVG, 'svg')]){
+      const im = svg.getElementsByTagNameNS(SVG, 'image')[0];
+      if (!im) continue;
+      const img = page.createElementNS('http://www.w3.org/1999/xhtml', 'img');
+      img.setAttribute('src', await zipImage(zip, joinPath(here, im.getAttribute('xlink:href') || im.getAttribute('href'))));
+      svg.replaceWith(img);
+    }
+    for (const img of body.getElementsByTagName('img')){
+      const src = img.getAttribute('src') || '';
+      if (!src.startsWith('data:')) img.setAttribute('src', await zipImage(zip, joinPath(here, src)));
+    }
+    for (const n of [...body.querySelectorAll('script,style,link')]) n.remove();
+    // links between chapters have nowhere to go once the book is one page
+    for (const a of [...body.querySelectorAll('a')]) if (!/^https?:/i.test(a.getAttribute('href') || '')) a.replaceWith(...a.childNodes);
+    for (const n of body.querySelectorAll('[style],[class]')) { n.removeAttribute('style'); n.removeAttribute('class'); }
+    if (!body.textContent.trim() && !body.getElementsByTagName('img').length) continue;
+    out += (chapters++ ? '<hr>' : '') + body.innerHTML;
+  }
+  return clean(out);
+}
+
+// PDF has no paragraphs, only positioned runs of text. Rebuild lines from
+// positions, paragraphs from the gaps between lines, headings from type
+// size, and drop page numbers and running headers.
+let pdfWorker = null;
+async function pdfToHtml(bytes){
+  await loadScript(PDFJS + 'pdf.min.js');
+  if (!window.DOMPurify) throw new Error(NEEDS_NET);
+  const lib = window.pdfjsLib;
+  if (!pdfWorker){
+    // a page opened from disk may not start a worker from another site, so hand it a local copy
+    const r = await fetch(PDFJS + 'pdf.worker.min.js').catch(() => null);
+    if (!r || !r.ok) throw new Error(NEEDS_NET);
+    pdfWorker = URL.createObjectURL(new Blob([await r.text()], {type: 'text/javascript'}));
+  }
+  lib.GlobalWorkerOptions.workerSrc = pdfWorker;
+  const pdf = await lib.getDocument({data: bytes.slice(), cMapUrl: CMAPS, cMapPacked: true, isEvalSupported: false}).promise;
+
+  const lines = [];
+  for (let n = 1; n <= pdf.numPages; n++){
+    const page = await pdf.getPage(n);
+    const content = await page.getTextContent();
+    let cur = null;
+    const finish = () => { if (cur && cur.text.trim()) lines.push(cur); cur = null; };
+    for (const it of content.items){
+      if (typeof it.str !== 'string') continue;
+      const size = Math.hypot(it.transform[2], it.transform[3]) || it.height || 10;
+      const x = it.transform[4], y = it.transform[5];
+      if (cur && Math.abs(y - cur.y) > Math.max(size, cur.size) * 0.5) finish();
+      if (!cur) cur = {text: '', size, y, x, end: x, page: n};
+      if (cur.text && it.str && !/\s$/.test(cur.text) && !/^\s/.test(it.str) && x - cur.end > size * 0.15) cur.text += ' ';
+      cur.text += it.str;
+      if (it.str.trim()) cur.size = Math.max(cur.size, size);
+      cur.end = x + (it.width || 0);
+      if (it.hasEOL) finish();
+    }
+    finish();
+    page.cleanup();
+  }
+
+  let title = '';
+  try { title = ((await pdf.getMetadata()).info.Title || '').replace(/^Microsoft Word - /, '').trim(); } catch (e) {}
+  if (/\.[a-z0-9]{2,5}$/i.test(title)) title = '';      // a file name left behind by whatever made the PDF
+  let out = '<h1>' + escHtml(title || fileTitle()) + '</h1>';
+  if (!lines.length) return clean(out + '<p class="chat-note">This PDF has no text in it, so there is nothing to reflow. It is most likely a scan.</p>');
+
+  // the body size is the one most text is set in
+  const weight = {};
+  for (const l of lines) { const k = Math.round(l.size * 2) / 2; weight[k] = (weight[k] || 0) + l.text.length; }
+  const body = +Object.keys(weight).sort((a, b) => weight[b] - weight[a])[0];
+  const widths = lines.filter(l => Math.abs(l.size - body) < 1).map(l => l.end - l.x).sort((a, b) => a - b);
+  const fullWidth = widths[Math.floor(widths.length * 0.8)] || 0;
+  // running headers and footers: the same line (page numbers aside) at the
+  // top or bottom edge of many pages
+  const edge = new Set(), seen = {};
+  lines.forEach((l, i) => {
+    const near = k => lines[i + k] && lines[i + k].page === l.page;
+    if (!near(-2) || !near(2)) edge.add(l);
+  });
+  for (const l of edge) {
+    const k = l.text.trim().replace(/\d+/g, '#');
+    (seen[k] = seen[k] || new Set()).add(l.page);
+  }
+  const running = l => edge.has(l) && pdf.numPages > 2 && (seen[l.text.trim().replace(/\d+/g, '#')] || new Set()).size >= Math.max(3, pdf.numPages * 0.5);
+
+  let para = '', head = null, prev = null;
+  const flushPara = () => { if (para.trim()) out += '<p>' + escHtml(para.trim()) + '</p>'; para = ''; };
+  const flushHead = () => { if (head) { out += '<' + head.tag + '>' + escHtml(head.text) + '</' + head.tag + '>'; head = null; } };
+  for (const l of lines){
+    const t = l.text.replace(/\s+/g, ' ').trim();
+    if (/^(page\s*)?\d+(\s*(of|\/)\s*\d+)?$/i.test(t)) continue;
+    if (running(l)) continue;
+
+    if (l.size >= body * 1.18 && t.length < 160){
+      const tag = l.size >= body * 1.6 ? 'h2' : 'h3';
+      flushPara();
+      if (head && head.tag === tag && head.page === l.page && head.y - l.y < l.size * 2) head.text += ' ' + t;
+      else { flushHead(); head = {tag, text: t, page: l.page}; }
+      head.y = l.y; prev = null;
+      continue;
+    }
+    flushHead();
+    if (prev){
+      const gap = prev.page === l.page ? prev.y - l.y : 0;
+      const ended = /[.!?:"\u201D)]$/.test(para.trim());
+      const shortPrev = fullWidth && prev.end - prev.x < fullWidth * 0.75;
+      if (gap > prev.size * 1.9 || (ended && shortPrev) || gap < 0) flushPara();
+    }
+    if (para && /[a-z]-$/.test(para) && /^[a-z]/.test(t)) para = para.slice(0, -1) + t;
+    else para += (para ? ' ' : '') + t;
+    prev = l;
+  }
+  flushPara(); flushHead();
+  pdf.destroy();
+  return clean(out);
+}
+
+// Everything a file can be turned into. Returns HTML, or a promise of it for
+// the formats that are unpacked asynchronously.
+function convert(){
+  switch (docKind){
+    case 'docx': return docxToHtml(docBytes);
+    case 'epub': return epubToHtml(docBytes);
+    case 'pdf':  return pdfToHtml(docBytes);
+    case 'rtf':  return clean(rtfToHtml(source));
+    case 'text': return clean(textToHtml(source));
+    case 'log':  return clean('<pre class="log">' + escHtml(source) + '</pre>');
+    case 'rst':  return toHtml(rstToMd(source));
+    case 'adoc': return toHtml(adocToMd(source));
+    case 'org':  return toHtml(orgToMd(source));
+    case 'csv':  return clean(tableToHtml(parseDelimited(source, sniffSep(source))));
+    case 'tsv':  return clean(tableToHtml(parseDelimited(source, '\t')));
+    case 'json': return clean(jsonToHtml(source));
+    case 'html': return window.DOMPurify ? clean(htmlReader(source)) : clean(textToHtml(source));
+    default:     return docToHtml(source, docName);
+  }
+}
+
 function docToHtml(text, name){
   if (!looksLikeJsonl(text, name)) return toHtml(text);
   const {recs, bad} = parseJsonl(text);
@@ -633,9 +1237,32 @@ function bionify(root, pct){
   });
 }
 
+// Converting happens once per document; changing a setting only repaints.
 function render(){
-  const html = docToHtml(source, docName);
-  doc.innerHTML = html;
+  const seq = render.seq = (render.seq || 0) + 1;
+  if (docHtml === null){
+    let out;
+    try { out = convert(); }
+    catch (e) { out = '<p class="fallback">' + escHtml(e.message) + '</p>'; }
+    if (out && typeof out.then === 'function'){
+      doc.innerHTML = '<p class="chat-note">Opening ' + escHtml(docName || 'the file') + '\u2026</p>';
+      out.then(h => { docHtml = h; }, e => { docHtml = '<p class="fallback">' + escHtml(e.message || String(e)) + '</p>'; })
+         .then(() => { if (seq === render.seq) paint(); });
+      return;
+    }
+    docHtml = out;
+  }
+  paint();
+}
+
+function paint(){
+  doc.innerHTML = docHtml;
+  // relative pictures and links point next to the original file
+  if (docBase) doc.querySelectorAll('img[src],a[href]').forEach(el => {
+    const at = el.tagName === 'IMG' ? 'src' : 'href', v = el.getAttribute(at);
+    if (!v || /^([a-z][a-z0-9+.-]*:|#|\/\/)/i.test(v)) return;
+    try { el.setAttribute(at, new URL(v, docBase).href); } catch (e) {}
+  });
   doc.querySelectorAll('table').forEach(t => {
     const w = document.createElement('div'); w.className = 'tablewrap';
     t.parentNode.insertBefore(w, t); w.append(t);
@@ -648,8 +1275,8 @@ function render(){
   $('#sWords').textContent = words.toLocaleString();
   $('#sTime').textContent = Math.max(1, Math.round(words / 220));
   const h1 = doc.querySelector('h1');
-  // a chat log's title says more than its file name, which is usually an id
-  if (h1 && (!EMBEDDED || doc.querySelector('.turn'))) $('#docname').textContent = h1.textContent;
+  // a chat log's or a book's title says more than its file name
+  if (h1 && (!EMBEDDED || doc.querySelector('.turn') || docKind === 'epub' || docKind === 'pdf')) $('#docname').textContent = h1.textContent;
   onScroll();
 }
 
@@ -705,20 +1332,23 @@ stage.addEventListener('pointermove', e => {
 });
 
 /* ── files, source editor ──────────────────────────────────── */
-function load(text, name){
-  source = text;
-  docName = name || '';
-  srcStale = true;
-  if (document.body.classList.contains('src-on')) fillSource();
-  if (name) $('#docname').textContent = name;
-  if (!EMBEDDED) try{ localStorage.setItem('reading-desk-doc', text); }catch(e){}
-  render(); stage.scrollTop = 0;
+function loadFile(f){
+  f.arrayBuffer().then(buf => {
+    takeDoc(new Uint8Array(buf), f.name);
+    docBase = '';
+    srcStale = true;
+    if (document.body.classList.contains('src-on')) fillSource();
+    $('#docname').textContent = f.name;
+    // remember text documents for next time; books and PDFs are too big to keep
+    if (!EMBEDDED && !docBytes && source.length < 2e6) try {
+      localStorage.setItem('reading-desk-doc', source);
+      localStorage.setItem('reading-desk-name', docName);
+    } catch (e) {}
+    render(); stage.scrollTop = 0;
+  });
 }
 $('#bOpen').onclick = () => $('#file').click();
-$('#file').onchange = e => {
-  const f = e.target.files[0]; if (!f) return;
-  f.text().then(t => load(t, f.name));
-};
+$('#file').onchange = e => { const f = e.target.files[0]; if (f) loadFile(f); e.target.value = ''; };
 ['dragenter','dragover'].forEach(ev => addEventListener(ev, e => { e.preventDefault(); document.body.classList.add('dragging'); }));
 ['dragleave','drop'].forEach(ev => addEventListener(ev, e => {
   if (ev === 'dragleave' && e.relatedTarget) return;
@@ -726,12 +1356,12 @@ $('#file').onchange = e => {
 }));
 addEventListener('drop', e => {
   e.preventDefault();
-  const f = e.dataTransfer.files[0]; if (f) f.text().then(t => load(t, f.name));
+  const f = e.dataTransfer.files[0]; if (f) loadFile(f);
 });
 let tmr;
 $('#srcText').addEventListener('input', e => {
   clearTimeout(tmr);
-  tmr = setTimeout(() => { source = e.target.value;
+  tmr = setTimeout(() => { source = e.target.value; docHtml = null;
     if (!EMBEDDED) try{ localStorage.setItem('reading-desk-doc', source); }catch(err){}
     render(); }, 220);
 });

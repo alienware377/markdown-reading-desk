@@ -32,8 +32,22 @@ static class App {
     public const string ProgId   = "ReadingDesk.md";
     public const string ExeName  = "ReadingDesk.exe";
     public const string TypeName = "Markdown Document";
-    public const string JsonlProgId   = "ReadingDesk.jsonl";
-    public const string JsonlTypeName = "JSON Lines Document";
+
+    // Every extension the reader understands, with the name Explorer shows for
+    // that kind of file. Each gets its own file type, "ReadingDesk" + extension.
+    public static readonly string[,] Formats = {
+        {".md", "Markdown Document"}, {".markdown", "Markdown Document"}, {".mdown", "Markdown Document"},
+        {".mkd", "Markdown Document"}, {".mkdn", "Markdown Document"}, {".mdwn", "Markdown Document"},
+        {".mdx", "MDX Document"}, {".rmd", "R Markdown Document"},
+        {".txt", "Text Document"}, {".text", "Text Document"}, {".log", "Log File"},
+        {".rst", "reStructuredText Document"}, {".adoc", "AsciiDoc Document"},
+        {".asciidoc", "AsciiDoc Document"}, {".org", "Org Document"},
+        {".csv", "CSV File"}, {".tsv", "TSV File"},
+        {".json", "JSON File"}, {".jsonl", "JSON Lines Document"}, {".ndjson", "JSON Lines Document"},
+        {".html", "HTML Document"}, {".htm", "HTML Document"}, {".xhtml", "XHTML Document"},
+        {".rtf", "Rich Text Document"}, {".docx", "Word Document"},
+        {".epub", "EPUB Book"}, {".pdf", "PDF Document"}
+    };
     public const string Blurb    = "Read markdown files with reading-mode controls";
 
     public static string DefaultDir {
@@ -172,14 +186,16 @@ static class LongPath {
         return a != INVALID_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY) == 0;
     }
 
-    public static string ReadAllText(string path) {
+    public static byte[] ReadAllBytes(string path) {
         using (SafeFileHandle h = CreateFileW(Extended(path), GENERIC_READ,
                    FILE_SHARE_READ_WRITE_DELETE, IntPtr.Zero, OPEN_EXISTING, 0, IntPtr.Zero)) {
             if (h.IsInvalid) throw new IOException(
                 "Could not open the file (error " + Marshal.GetLastWin32Error() + ").");
             using (FileStream fs = new FileStream(h, FileAccess.Read))
-            using (StreamReader r = new StreamReader(fs, Encoding.UTF8, true))
-                return r.ReadToEnd();
+            using (MemoryStream ms = new MemoryStream()) {
+                fs.CopyTo(ms);
+                return ms.ToArray();
+            }
         }
     }
 
@@ -195,12 +211,29 @@ static class LongPath {
     /// Explorer falls back to 8.3 names on long paths, and COWFIT~1.MD is a
     /// poor title. Ask Windows for the real one.
     public static string DisplayName(string path) {
+        string full = LongName(path);
+        return FileName(full.Length > 0 ? full : path);
+    }
+
+    /// The file's folder as a file:/// address, so the page can find pictures
+    /// and links written relative to the document.
+    public static string FolderUrl(string path) {
+        try {
+            string full = LongName(path);
+            if (full.Length == 0) return "";
+            if (full.StartsWith(@"\\?\UNC\")) full = @"\\" + full.Substring(8);
+            else if (full.StartsWith(@"\\?\")) full = full.Substring(4);
+            return new Uri(full.Substring(0, full.LastIndexOf('\\') + 1)).AbsoluteUri;
+        } catch { return ""; }
+    }
+
+    static string LongName(string path) {
         try {
             StringBuilder buf = new StringBuilder(32768);
             int n = GetLongPathNameW(Extended(path), buf, buf.Capacity);
-            if (n > 0 && n < buf.Capacity) return FileName(buf.ToString());
+            if (n > 0 && n < buf.Capacity) return buf.ToString();
         } catch { }
-        return FileName(path);
+        return "";
     }
 }
 
@@ -214,6 +247,11 @@ static class LongPath {
 // chat log is passed through untouched.
 
 static class Jsonl {
+
+    public static string Decode(byte[] data) {
+        using (StreamReader r = new StreamReader(new MemoryStream(data), new UTF8Encoding(false), true))
+            return r.ReadToEnd();
+    }
 
     public static bool IsJsonlName(string name) {
         string n = name.ToLowerInvariant();
@@ -306,14 +344,15 @@ static class Jsonl {
 static class Reader {
     const string Welcome =
         "# Markdown Reading Desk\n\n" +
-        "Drop a **.md** file onto this window, or press **Open .md** up in the bar.\n";
+        "Drop a document onto this window, or press **Open file** up in the bar.\n";
 
     public static void Open(string path) {
         string dir = Path.GetDirectoryName(App.SelfPath);
-        string md, name;
+        byte[] data;
+        string name, folder = "";
 
         if (string.IsNullOrEmpty(path)) {
-            md = Welcome;
+            data = new UTF8Encoding(false).GetBytes(Welcome);
             name = "no file open";
         } else {
             if (!LongPath.FileExists(path)) {
@@ -321,23 +360,25 @@ static class Reader {
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
-            try { md = LongPath.ReadAllText(path); }
+            try { data = LongPath.ReadAllBytes(path); }
             catch (Exception ex) {
                 MessageBox.Show("Could not read that file:\r\n\r\n" + path + "\r\n\r\n" + ex.Message,
                     App.Title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
             name = LongPath.DisplayName(path);
-            if (Jsonl.IsJsonlName(name)) md = Jsonl.Slim(md);
+            folder = LongPath.FolderUrl(path);
+            if (Jsonl.IsJsonlName(name)) data = new UTF8Encoding(false).GetBytes(Jsonl.Slim(Jsonl.Decode(data)));
         }
 
         string tplPath = Path.Combine(dir, "viewer.html");
         string tpl = File.Exists(tplPath) ? File.ReadAllText(tplPath) : "";
-        if (!tpl.Contains("data-enc=\"base64\"")) tpl = Installer.BuildViewer();   // older install
+        if (!tpl.Contains("data-base=")) tpl = Installer.BuildViewer();   // older install
 
         string html = tpl
-            .Replace("<!--EMBED-->", Convert.ToBase64String(new UTF8Encoding(false).GetBytes(md)))
-            .Replace("<!--NAME-->", name.Replace("&", "&amp;").Replace("\"", "&quot;"));
+            .Replace("<!--EMBED-->", Convert.ToBase64String(data))
+            .Replace("<!--NAME-->", Attr(name))
+            .Replace("<!--BASE-->", Attr(folder));
 
         string outDir = Path.Combine(dir, "open");
         try { Directory.CreateDirectory(outDir); }
@@ -365,6 +406,8 @@ static class Reader {
             Process.Start(browser, "--app=\"file:///" + outPath.Replace("\\", "/") + "\"");
         }
     }
+
+    static string Attr(string s) { return s.Replace("&", "&amp;").Replace("\"", "&quot;"); }
 
     static string FindBrowser() {
         string pf   = Environment.GetEnvironmentVariable("ProgramFiles") ?? "";
@@ -437,18 +480,18 @@ static class Installer {
         string dir = RegisteredDir();
         if (dir.Length == 0) dir = Path.GetDirectoryName(App.SelfPath);
 
-        Registry.CurrentUser.DeleteSubKeyTree(@"Software\Classes\" + App.ProgId, false);
-        Registry.CurrentUser.DeleteSubKeyTree(@"Software\Classes\" + App.JsonlProgId, false);
+        for (int f = 0; f < App.Formats.GetLength(0); f++) {
+            string ext = App.Formats[f, 0], prog = "ReadingDesk" + ext;
+            Registry.CurrentUser.DeleteSubKeyTree(@"Software\Classes\" + prog, false);
+            using (RegistryKey k = Registry.CurrentUser.OpenSubKey(@"Software\Classes\" + ext + @"\OpenWithProgids", true))
+                if (k != null) try { k.DeleteValue(prog, false); } catch { }
+        }
         Registry.CurrentUser.DeleteSubKeyTree(@"Software\Classes\Applications\" + App.ExeName, false);
         Registry.CurrentUser.DeleteSubKeyTree(@"Software\ReadingDesk", false);
 
         using (RegistryKey k = Registry.CurrentUser.OpenSubKey(@"Software\RegisteredApplications", true))
             if (k != null) try { k.DeleteValue(App.Title, false); } catch { }
 
-        using (RegistryKey k = Registry.CurrentUser.OpenSubKey(@"Software\Classes\.md\OpenWithProgids", true))
-            if (k != null) try { k.DeleteValue(App.ProgId, false); } catch { }
-        using (RegistryKey k = Registry.CurrentUser.OpenSubKey(@"Software\Classes\.jsonl\OpenWithProgids", true))
-            if (k != null) try { k.DeleteValue(App.JsonlProgId, false); } catch { }
 
         // put back whatever .md pointed at before
         string note = Path.Combine(dir, "previous-md-progid.txt");
@@ -475,14 +518,6 @@ static class Installer {
     static void Register(string exe, string icoPath) {
         string cmd = "\"" + exe + "\" \"%1\"";
 
-        using (RegistryKey k = Registry.CurrentUser.CreateSubKey(@"Software\Classes\" + App.ProgId)) {
-            k.SetValue(null, App.TypeName);
-            k.SetValue("FriendlyTypeName", App.TypeName);
-        }
-        using (RegistryKey k = Registry.CurrentUser.CreateSubKey(@"Software\Classes\" + App.ProgId + @"\DefaultIcon"))
-            k.SetValue(null, icoPath + ",0");
-        using (RegistryKey k = Registry.CurrentUser.CreateSubKey(@"Software\Classes\" + App.ProgId + @"\shell\open\command"))
-            k.SetValue(null, cmd);
 
         string ak = @"Software\Classes\Applications\" + App.ExeName;
         using (RegistryKey k = Registry.CurrentUser.CreateSubKey(ak))
@@ -491,33 +526,33 @@ static class Installer {
             k.SetValue(null, icoPath + ",0");
         using (RegistryKey k = Registry.CurrentUser.CreateSubKey(ak + @"\shell\open\command"))
             k.SetValue(null, cmd);
-        using (RegistryKey k = Registry.CurrentUser.CreateSubKey(ak + @"\SupportedTypes")) {
-            k.SetValue(".md", "");
-            k.SetValue(".jsonl", "");
-        }
 
-        // .jsonl gets its own file type, offered in Open with but never forced:
-        // whatever already opens .jsonl keeps doing so until the person picks.
-        using (RegistryKey k = Registry.CurrentUser.CreateSubKey(@"Software\Classes\" + App.JsonlProgId)) {
-            k.SetValue(null, App.JsonlTypeName);
-            k.SetValue("FriendlyTypeName", App.JsonlTypeName);
+        // Every format is offered in Open with, never forced: whatever opens a
+        // .txt or .pdf today keeps doing so until the person picks this app.
+        using (RegistryKey supported = Registry.CurrentUser.CreateSubKey(ak + @"\SupportedTypes"))
+        using (RegistryKey assoc = Registry.CurrentUser.CreateSubKey(@"Software\ReadingDesk\Capabilities\FileAssociations")) {
+            for (int f = 0; f < App.Formats.GetLength(0); f++) {
+                string ext = App.Formats[f, 0], type = App.Formats[f, 1], prog = "ReadingDesk" + ext;
+                using (RegistryKey k = Registry.CurrentUser.CreateSubKey(@"Software\Classes\" + prog)) {
+                    k.SetValue(null, type);
+                    k.SetValue("FriendlyTypeName", type);
+                }
+                using (RegistryKey k = Registry.CurrentUser.CreateSubKey(@"Software\Classes\" + prog + @"\DefaultIcon"))
+                    k.SetValue(null, icoPath + ",0");
+                using (RegistryKey k = Registry.CurrentUser.CreateSubKey(@"Software\Classes\" + prog + @"\shell\open\command"))
+                    k.SetValue(null, cmd);
+                using (RegistryKey k = Registry.CurrentUser.CreateSubKey(@"Software\Classes\" + ext + @"\OpenWithProgids"))
+                    k.SetValue(prog, new byte[0], RegistryValueKind.None);
+                supported.SetValue(ext, "");
+                assoc.SetValue(ext, prog);
+            }
         }
-        using (RegistryKey k = Registry.CurrentUser.CreateSubKey(@"Software\Classes\" + App.JsonlProgId + @"\DefaultIcon"))
-            k.SetValue(null, icoPath + ",0");
-        using (RegistryKey k = Registry.CurrentUser.CreateSubKey(@"Software\Classes\" + App.JsonlProgId + @"\shell\open\command"))
-            k.SetValue(null, cmd);
-        using (RegistryKey k = Registry.CurrentUser.CreateSubKey(@"Software\Classes\.jsonl\OpenWithProgids"))
-            k.SetValue(App.JsonlProgId, new byte[0], RegistryValueKind.None);
 
         // listed as a real app, so Settings can offer it under Default apps
         using (RegistryKey k = Registry.CurrentUser.CreateSubKey(@"Software\ReadingDesk\Capabilities")) {
             k.SetValue("ApplicationName", App.Title);
             k.SetValue("ApplicationDescription", App.Blurb);
             k.SetValue("ApplicationIcon", icoPath + ",0");
-        }
-        using (RegistryKey k = Registry.CurrentUser.CreateSubKey(@"Software\ReadingDesk\Capabilities\FileAssociations")) {
-            k.SetValue(".md", App.ProgId);
-            k.SetValue(".jsonl", App.JsonlProgId);
         }
         using (RegistryKey k = Registry.CurrentUser.CreateSubKey(@"Software\RegisteredApplications"))
             k.SetValue(App.Title, @"Software\ReadingDesk\Capabilities");
@@ -526,8 +561,6 @@ static class Installer {
             k.SetValue(null, App.ProgId);
             k.SetValue("PerceivedType", "text");
         }
-        using (RegistryKey k = Registry.CurrentUser.CreateSubKey(@"Software\Classes\.md\OpenWithProgids"))
-            k.SetValue(App.ProgId, new byte[0], RegistryValueKind.None);
     }
 
     static string ShortcutPath() {
@@ -557,8 +590,9 @@ static class Installer {
                "installer can set it for you.\r\n\r\n" +
                "Right-click any .md file, choose Open with, then Choose another app, " +
                "pick " + App.Title + ", and tick Always use this app.\r\n\r\n" +
-               "It opens .jsonl files too. Use Open with the same way if you want " +
-               "them to open here by default.";
+               "It also reads text, CSV, JSON, JSONL, HTML, RTF, Word, EPUB and PDF " +
+               "files. Use Open with the same way for any of those you want to open " +
+               "here by default.";
     }
 
     // ---- the reader page -------------------------------------------------
@@ -574,7 +608,7 @@ static class Installer {
 
         const string anchor = "<div class=\"app\" id=\"app\">";
         string slot = "<script type=\"text/markdown\" id=\"embedded\" data-enc=\"base64\" " +
-                      "data-name=\"<!--NAME-->\"><!--EMBED--></script>\r\n";
+                      "data-name=\"<!--NAME-->\" data-base=\"<!--BASE-->\"><!--EMBED--></script>\r\n";
         reader = reader.Replace(anchor, slot + anchor);
 
         // the window takes its taskbar icon from the page favicon, so inline it

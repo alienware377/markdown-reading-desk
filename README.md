@@ -1,11 +1,12 @@
 # Markdown Reading Desk
 
-A single-file markdown reader with the reading-mode controls iOS keeps to itself.
-Double-click a `.md` file, get a properly typeset page, then tune the tint,
-the typeface, the measure, and the reading aids until it's comfortable.
+A single-file reader with the reading-mode controls iOS keeps to itself.
+Double-click a Markdown file, a PDF, an EPUB, a Word document or a dozen other
+kinds, get a properly typeset page, then tune the tint, the typeface, the
+measure and the reading aids until it's comfortable.
 
 No build step, no dependencies to install, no server, nothing phoning home.
-One HTML file plus a ~13 KB launcher.
+One HTML file plus a small launcher.
 
 ---
 
@@ -44,9 +45,31 @@ voice, print, and save-as-styled-HTML.
 Everything you change is kept in the browser's local storage, so the desk looks
 the same next time you sit down.
 
-## JSON Lines
+## What it opens
 
-`.jsonl` files open too.
+| Kind | Extensions | How it reads |
+| --- | --- | --- |
+| Markdown | `.md` `.markdown` `.mdown` `.mkd` `.mkdn` `.mdwn` `.mdx` `.rmd` | typeset as written |
+| Plain text | `.txt` `.text` | paragraphs, with hard-wrapped lines joined back up |
+| Logs | `.log` | as they are, wrapped to the window |
+| reStructuredText, AsciiDoc, Org | `.rst` `.adoc` `.asciidoc` `.org` | headings, emphasis, links and code blocks carried over |
+| CSV, TSV | `.csv` `.tsv` | a table; semicolon CSVs are recognised |
+| JSON | `.json` | a table or labelled fields |
+| JSON Lines | `.jsonl` `.ndjson` | chat logs as a conversation, anything else as records |
+| Web pages | `.html` `.htm` `.xhtml` | the article only: no menus, banners, sidebars, scripts or page colours |
+| Rich text | `.rtf` | text, paragraphs, bold, italic, underline |
+| Word | `.docx` | headings, lists, tables, links and pictures |
+| EPUB | `.epub` | the whole book on one page, chapter after chapter, with its pictures |
+| PDF | `.pdf` | reflowed into paragraphs and headings, without page numbers or running headers |
+
+Pictures and links written relative to a document are found next to the file.
+Text files saved in an older Windows code page are read correctly too.
+
+Word, EPUB and PDF are unpacked in the page by [JSZip](https://stuk.github.io/jszip/)
+and [PDF.js](https://mozilla.github.io/pdf.js/), loaded the first time you open
+one. A scanned PDF has no text to reflow, and says so.
+
+### JSON Lines
 
 **Chat logs** (JSONL where each line is a `user` or `assistant` record with a
 `message`) read as a clean conversation: what you asked, what came back, with
@@ -85,7 +108,10 @@ It is unsigned, so SmartScreen will ask first; choose *More info*, then *Run any
 
 That one file is the whole app. It installs a copy of itself, unpacks the
 reader beside it, draws its icon, adds a Start Menu entry, and registers as a
-handler for `.md`. Nothing is written outside your own user account.
+handler for Markdown and every format above. Only `.md` is made the default;
+the rest are offered in Open with, so whatever opens your PDFs or text files
+today keeps doing so until you choose. Nothing is written outside your own
+user account.
 
 **One step is yours.** Windows 11 protects the default-app choice with a hash,
 so no installer, this one included, may set it for you:
@@ -113,13 +139,13 @@ Pass `-Dest` to `install.ps1` to choose the folder. Both need .NET Framework
 
 ## Use it without installing
 
-`reading-desk.html` works on its own. Open it in any browser and drop a `.md`
-file onto the window, or paste into the source pane.
+`reading-desk.html` works on its own. Open it in any browser and drop any of
+the files above onto the window, or paste Markdown into the source pane.
 
 ## How it works
 
-`ReadingDesk.exe` takes the `.md` path Explorer hands it, reads the text,
-drops it into `viewer.html` inside a `<script type="text/markdown">` block,
+`ReadingDesk.exe` takes the path Explorer hands it, reads the file, drops it
+into `viewer.html` (base64, inside a `<script type="text/markdown">` block),
 writes the result next to itself, and opens that in Chrome or Edge with
 `--app=` so you get a window without tabs or an address bar. If neither
 browser is present it falls back to your default one.
@@ -127,7 +153,8 @@ browser is present it falls back to your default one.
 Markdown is parsed by [marked](https://github.com/markedjs/marked) and
 sanitized with [DOMPurify](https://github.com/cure53/DOMPurify), both loaded
 from cdnjs. Fonts come from Google Fonts. Those are the only network requests
-the page makes. Offline, it falls back to system fonts and shows the raw text.
+the page makes, plus JSZip and PDF.js for the formats that need them. Offline,
+it falls back to system fonts and shows the raw text.
 
 ## Layout
 
